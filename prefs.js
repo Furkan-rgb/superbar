@@ -2,6 +2,7 @@ import Adw from "gi://Adw";
 import Gtk from "gi://Gtk";
 import Gdk from "gi://Gdk";
 import Gio from "gi://Gio";
+import GLib from "gi://GLib";
 import GObject from "gi://GObject";
 import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js";
 
@@ -106,11 +107,16 @@ const KeybindingRow = GObject.registerClass(
         // Ignore bare modifiers
         if (
           [
-            Gdk.KEY_Shift_L, Gdk.KEY_Shift_R,
-            Gdk.KEY_Control_L, Gdk.KEY_Control_R,
-            Gdk.KEY_Alt_L, Gdk.KEY_Alt_R,
-            Gdk.KEY_Super_L, Gdk.KEY_Super_R,
-            Gdk.KEY_Meta_L, Gdk.KEY_Meta_R,
+            Gdk.KEY_Shift_L,
+            Gdk.KEY_Shift_R,
+            Gdk.KEY_Control_L,
+            Gdk.KEY_Control_R,
+            Gdk.KEY_Alt_L,
+            Gdk.KEY_Alt_R,
+            Gdk.KEY_Super_L,
+            Gdk.KEY_Super_R,
+            Gdk.KEY_Meta_L,
+            Gdk.KEY_Meta_R,
           ].includes(keyval)
         )
           return Gdk.EVENT_PROPAGATE;
@@ -122,7 +128,12 @@ const KeybindingRow = GObject.registerClass(
             Gdk.ModifierType.ALT_MASK |
             Gdk.ModifierType.SUPER_MASK);
 
-        const accel = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mask);
+        const accel = Gtk.accelerator_name_with_keycode(
+          null,
+          keyval,
+          keycode,
+          mask,
+        );
         if (accel && accel !== "") {
           this._settings.set_strv(this._key, [accel]);
           this._syncLabel();
@@ -135,7 +146,7 @@ const KeybindingRow = GObject.registerClass(
       dialog.add_controller(controller);
       dialog.present();
     }
-  }
+  },
 );
 
 // ── Preferences page ────────────────────────────────────────────────────────
@@ -164,6 +175,127 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     });
     shortcutGroup.add(row);
 
+    // ── Behavior group ─────────────────────────────────────────────────────
+    const behaviorGroup = new Adw.PreferencesGroup({
+      title: "Clipboard",
+      description: "Control how clipboard history is collected and stored",
+    });
+    shortcutPage.add(behaviorGroup);
+
+    const clipToggleRow = new Adw.SwitchRow({
+      title: "Enable Clipboard Monitoring",
+      subtitle: "Track clipboard changes to build a searchable history",
+    });
+    settings.bind(
+      "clipboard-monitor-enabled",
+      clipToggleRow,
+      "active",
+      Gio.SettingsBindFlags.DEFAULT,
+    );
+    behaviorGroup.add(clipToggleRow);
+
+    const clipLimitRow = new Adw.SpinRow({
+      title: "History Limit",
+      subtitle: "Maximum number of clipboard entries to remember",
+      adjustment: new Gtk.Adjustment({
+        lower: 10,
+        upper: 200,
+        step_increment: 5,
+        page_increment: 20,
+        value: settings.get_int("clipboard-history-limit"),
+      }),
+    });
+    settings.bind(
+      "clipboard-history-limit",
+      clipLimitRow,
+      "value",
+      Gio.SettingsBindFlags.DEFAULT,
+    );
+    behaviorGroup.add(clipLimitRow);
+
+    const clearRow = new Adw.ActionRow({
+      title: "Clear Clipboard History",
+      subtitle: "Remove all saved clipboard entries from disk",
+    });
+    const clearBtn = new Gtk.Button({
+      label: "Clear",
+      valign: Gtk.Align.CENTER,
+      css_classes: ["destructive-action"],
+    });
+    clearBtn.connect("clicked", () => {
+      const historyPath = GLib.build_filenamev([
+        GLib.get_user_data_dir(),
+        "search-bar-clipboard-history.json",
+      ]);
+      try {
+        GLib.file_set_contents(historyPath, "[]");
+      } catch (_e) {}
+    });
+    clearRow.add_suffix(clearBtn);
+    behaviorGroup.add(clearRow);
+
+    // ── Appearance group ───────────────────────────────────────────────────
+    const appearanceGroup = new Adw.PreferencesGroup({
+      title: "Appearance",
+      description: "Adjust the size and position of the bar",
+    });
+    shortcutPage.add(appearanceGroup);
+
+    const maxResultsRow = new Adw.SpinRow({
+      title: "Max Search Results",
+      subtitle: "How many results to show in the list",
+      adjustment: new Gtk.Adjustment({
+        lower: 3,
+        upper: 20,
+        step_increment: 1,
+        page_increment: 5,
+        value: settings.get_int("max-results"),
+      }),
+    });
+    settings.bind(
+      "max-results",
+      maxResultsRow,
+      "value",
+      Gio.SettingsBindFlags.DEFAULT,
+    );
+    appearanceGroup.add(maxResultsRow);
+
+    const barWidthRow = new Adw.SpinRow({
+      title: "Bar Width",
+      subtitle: "Width of the Superbar in pixels",
+      adjustment: new Gtk.Adjustment({
+        lower: 400,
+        upper: 1200,
+        step_increment: 10,
+        page_increment: 50,
+        value: settings.get_int("bar-width"),
+      }),
+    });
+    settings.bind(
+      "bar-width",
+      barWidthRow,
+      "value",
+      Gio.SettingsBindFlags.DEFAULT,
+    );
+    appearanceGroup.add(barWidthRow);
+
+    const positionLabels = ["Top (¼ from top)", "Center", "Bottom"];
+    const positionKeys = ["top", "center", "bottom"];
+    const positionRow = new Adw.ComboRow({
+      title: "Vertical Position",
+      subtitle: "Where on screen the bar appears",
+      model: Gtk.StringList.new(positionLabels),
+    });
+    const currentPos = settings.get_string("bar-position");
+    positionRow.set_selected(Math.max(0, positionKeys.indexOf(currentPos)));
+    positionRow.connect("notify::selected", () => {
+      settings.set_string(
+        "bar-position",
+        positionKeys[positionRow.selected] ?? "top",
+      );
+    });
+    appearanceGroup.add(positionRow);
+
     // ── About / Donate page ────────────────────────────────────────────────
     const aboutPage = new Adw.PreferencesPage({
       title: "About",
@@ -190,13 +322,13 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       new Gtk.Image({
         icon_name: "external-link-symbolic",
         valign: Gtk.Align.CENTER,
-      })
+      }),
     );
     sourceRow.connect("activated", () =>
       Gio.AppInfo.launch_default_for_uri(
         "https://github.com/Furkan-rgb/superbar",
-        null
-      )
+        null,
+      ),
     );
     infoGroup.add(sourceRow);
 
@@ -217,13 +349,13 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       new Gtk.Image({
         icon_name: "external-link-symbolic",
         valign: Gtk.Align.CENTER,
-      })
+      }),
     );
     coffeeRow.connect("activated", () =>
       Gio.AppInfo.launch_default_for_uri(
         "https://buymeacoffee.com/furkan12",
-        null
-      )
+        null,
+      ),
     );
     donateGroup.add(coffeeRow);
   }

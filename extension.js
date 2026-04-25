@@ -14,7 +14,8 @@ function ensureActorVisibleInScrollView(scrollView, actor) {
     ? scrollView.get_vadjustment()
     : scrollView.get_vscroll_bar().get_adjustment();
   const value = adjustment.value;
-  const pageSize = adjustment.page_size ?? adjustment.pageSize ?? scrollView.height;
+  const pageSize =
+    adjustment.page_size ?? adjustment.pageSize ?? scrollView.height;
   const upper = adjustment.upper;
   const padding = 6;
 
@@ -49,9 +50,9 @@ function ensureActorVisibleInScrollView(scrollView, actor) {
 
 export default class SearchBar extends Extension {
   enable() {
+    this._settings = this.getSettings("org.gnome.shell.extensions.superbar");
     this._session = new Soup.Session();
     this._clipboard = St.Clipboard.get_default();
-    this._clipboardHistoryLimit = 50;
     this._clipboardHistory = [];
     this._loadClipboardHistory();
 
@@ -186,7 +187,23 @@ export default class SearchBar extends Extension {
       this._onTextChanged(),
     );
 
-    this._settings = this.getSettings("org.gnome.shell.extensions.superbar");
+    this._settingsChangedIds = [
+      this._settings.connect("changed::bar-width", () =>
+        this._repositionContainer(),
+      ),
+      this._settings.connect("changed::bar-position", () =>
+        this._repositionContainer(),
+      ),
+      this._settings.connect("changed::clipboard-monitor-enabled", () => {
+        if (this._settings.get_boolean("clipboard-monitor-enabled")) {
+          this._startClipboardMonitoring();
+        } else if (this._clipboardPollId) {
+          GLib.source_remove(this._clipboardPollId);
+          this._clipboardPollId = null;
+        }
+      }),
+    ];
+
     Main.wm.addKeybinding(
       "toggle-shortcut",
       this._settings,
@@ -200,6 +217,10 @@ export default class SearchBar extends Extension {
 
   disable() {
     Main.wm.removeKeybinding("toggle-shortcut");
+    if (this._settingsChangedIds) {
+      this._settingsChangedIds.forEach((id) => this._settings.disconnect(id));
+      this._settingsChangedIds = null;
+    }
     this._settings = null;
 
     if (this._clipboardPollId) {
@@ -356,7 +377,11 @@ export default class SearchBar extends Extension {
         this._fetchCurrency(currentText);
         return GLib.SOURCE_REMOVE;
       }
-      if (/^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+/i.test(currentText)) {
+      if (
+        /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+/i.test(
+          currentText,
+        )
+      ) {
         this._fetchWeather(currentText);
         return GLib.SOURCE_REMOVE;
       }
@@ -434,7 +459,12 @@ export default class SearchBar extends Extension {
           },
         ];
 
-          this._showResults(this._dedupeResults(combinedResults).slice(0, 8));
+        this._showResults(
+          this._dedupeResults(combinedResults).slice(
+            0,
+            this._settings.get_int("max-results"),
+          ),
+        );
       });
 
       return GLib.SOURCE_REMOVE;
@@ -443,7 +473,9 @@ export default class SearchBar extends Extension {
 
   _parseClipboardQuery(text) {
     const normalized = text.trim();
-    const match = normalized.match(/^(?:clip|clipboard|history)(?::|\s+)?(.*)$/i);
+    const match = normalized.match(
+      /^(?:clip|clipboard|history)(?::|\s+)?(.*)$/i,
+    );
     if (!match) return null;
     return match[1].trim();
   }
@@ -465,7 +497,7 @@ export default class SearchBar extends Extension {
         if (!Array.isArray(data)) return;
         this._clipboardHistory = data
           .filter((entry) => typeof entry?.text === "string")
-          .slice(0, this._clipboardHistoryLimit);
+          .slice(0, this._settings.get_int("clipboard-history-limit"));
       } catch (_e) {
         // history file missing or corrupt; start fresh
       }
@@ -484,11 +516,16 @@ export default class SearchBar extends Extension {
   }
 
   _startClipboardMonitoring() {
+    if (!this._settings.get_boolean("clipboard-monitor-enabled")) return;
     this._pollClipboard();
-    this._clipboardPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1200, () => {
-      this._pollClipboard();
-      return GLib.SOURCE_CONTINUE;
-    });
+    this._clipboardPollId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      1200,
+      () => {
+        this._pollClipboard();
+        return GLib.SOURCE_CONTINUE;
+      },
+    );
   }
 
   _pollClipboard() {
@@ -513,7 +550,7 @@ export default class SearchBar extends Extension {
         timestamp: Date.now(),
       },
       ...this._clipboardHistory.filter((entry) => entry.text !== text),
-    ].slice(0, this._clipboardHistoryLimit);
+    ].slice(0, this._settings.get_int("clipboard-history-limit"));
 
     this._saveClipboardHistory();
 
@@ -532,7 +569,8 @@ export default class SearchBar extends Extension {
     if (!haystack) return -1;
 
     if (haystack === needle) return 1000;
-    if (haystack.startsWith(needle)) return 850 - (haystack.length - needle.length);
+    if (haystack.startsWith(needle))
+      return 850 - (haystack.length - needle.length);
 
     const words = haystack.split(/[^a-z0-9]+/).filter(Boolean);
     if (words.some((word) => word.startsWith(needle))) {
@@ -563,7 +601,11 @@ export default class SearchBar extends Extension {
     return -1;
   }
 
-  _rankResultsByQuery(results, query, textSelector = (result) => result.label ?? "") {
+  _rankResultsByQuery(
+    results,
+    query,
+    textSelector = (result) => result.label ?? "",
+  ) {
     return results
       .map((result) => ({
         score: this._scoreSearchMatch(textSelector(result), query),
@@ -595,7 +637,9 @@ export default class SearchBar extends Extension {
     const symbolMatch = normalized.match(/^>\s*(.*)$/);
     if (symbolMatch) return symbolMatch[1].trim();
 
-    const prefixMatch = normalized.match(/^(?:cmd|command|action)(?::|\s+)?(.*)$/i);
+    const prefixMatch = normalized.match(
+      /^(?:cmd|command|action)(?::|\s+)?(.*)$/i,
+    );
     if (prefixMatch) return prefixMatch[1].trim();
 
     return null;
@@ -612,7 +656,7 @@ export default class SearchBar extends Extension {
       }))
       .filter((entry) => entry.score >= 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, 8)
+      .slice(0, this._settings.get_int("max-results"))
       .map(({ appInfo }) => ({
         type: "app",
         label: appInfo.get_name(),
@@ -847,7 +891,11 @@ export default class SearchBar extends Extension {
   // --- Web Fetches ---
 
   async _fetchWeather(text) {
-    const match = text.trim().match(/^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+(.+)$/i);
+    const match = text
+      .trim()
+      .match(
+        /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+(.+)$/i,
+      );
     if (!match) return;
     const query = match[1].trim();
 
@@ -866,7 +914,9 @@ export default class SearchBar extends Extension {
       if (!geoData.results?.length) return;
 
       const { name, latitude, longitude, country_code } = geoData.results[0];
-      const cityName = country_code ? `${name}, ${country_code.toUpperCase()}` : name;
+      const cityName = country_code
+        ? `${name}, ${country_code.toUpperCase()}`
+        : name;
 
       // Step 2: Fetch weather for those coordinates
       const weatherUrl =
@@ -888,19 +938,21 @@ export default class SearchBar extends Extension {
       const d = w.daily;
       const code = c.weather_code;
 
-      this._showResults([{
-        type: "weather",
-        icon: this._weatherIcon(code),
-        temp: `${Math.round(c.temperature_2m)}°C`,
-        description: this._wmoDescription(code),
-        city: cityName,
-        details:
-          `Feels like ${Math.round(c.apparent_temperature)}°C` +
-          `  ·  Wind ${Math.round(c.wind_speed_10m)} km/h` +
-          `  ·  Humidity ${c.relative_humidity_2m}%` +
-          `  ·  ↑${Math.round(d.temperature_2m_max[0])}°  ↓${Math.round(d.temperature_2m_min[0])}°`,
-        uri: `https://wttr.in/${encodeURIComponent(name)}`,
-      }]);
+      this._showResults([
+        {
+          type: "weather",
+          icon: this._weatherIcon(code),
+          temp: `${Math.round(c.temperature_2m)}°C`,
+          description: this._wmoDescription(code),
+          city: cityName,
+          details:
+            `Feels like ${Math.round(c.apparent_temperature)}°C` +
+            `  ·  Wind ${Math.round(c.wind_speed_10m)} km/h` +
+            `  ·  Humidity ${c.relative_humidity_2m}%` +
+            `  ·  ↑${Math.round(d.temperature_2m_max[0])}°  ↓${Math.round(d.temperature_2m_min[0])}°`,
+          uri: `https://wttr.in/${encodeURIComponent(name)}`,
+        },
+      ]);
     } catch (e) {}
   }
 
@@ -917,16 +969,34 @@ export default class SearchBar extends Extension {
 
   _wmoDescription(code) {
     const map = {
-      0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-      45: "Fog", 48: "Icing fog",
-      51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
-      56: "Light freezing drizzle", 57: "Dense freezing drizzle",
-      61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
-      66: "Light freezing rain", 67: "Heavy freezing rain",
-      71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 77: "Snow grains",
-      80: "Slight showers", 81: "Moderate showers", 82: "Violent showers",
-      85: "Slight snow showers", 86: "Heavy snow showers",
-      95: "Thunderstorm", 96: "Thunderstorm, slight hail", 99: "Thunderstorm, heavy hail",
+      0: "Clear sky",
+      1: "Mainly clear",
+      2: "Partly cloudy",
+      3: "Overcast",
+      45: "Fog",
+      48: "Icing fog",
+      51: "Light drizzle",
+      53: "Moderate drizzle",
+      55: "Dense drizzle",
+      56: "Light freezing drizzle",
+      57: "Dense freezing drizzle",
+      61: "Slight rain",
+      63: "Moderate rain",
+      65: "Heavy rain",
+      66: "Light freezing rain",
+      67: "Heavy freezing rain",
+      71: "Slight snow",
+      73: "Moderate snow",
+      75: "Heavy snow",
+      77: "Snow grains",
+      80: "Slight showers",
+      81: "Moderate showers",
+      82: "Violent showers",
+      85: "Slight snow showers",
+      86: "Heavy snow showers",
+      95: "Thunderstorm",
+      96: "Thunderstorm, slight hail",
+      99: "Thunderstorm, heavy hail",
     };
     return map[code] ?? "Unknown";
   }
@@ -1053,39 +1123,70 @@ export default class SearchBar extends Extension {
         row.add_style_class_name("weather-card");
 
         const topRow = new St.BoxLayout({ vertical: false, x_expand: true });
-        topRow.add_child(new St.Icon({
-          icon_name: result.icon,
-          style_class: "weather-card-icon",
-        }));
-        topRow.add_child(new St.Label({
-          text: result.temp,
-          style_class: "weather-temp",
-          y_align: Clutter.ActorAlign.CENTER,
-        }));
+        topRow.add_child(
+          new St.Icon({
+            icon_name: result.icon,
+            style_class: "weather-card-icon",
+          }),
+        );
+        topRow.add_child(
+          new St.Label({
+            text: result.temp,
+            style_class: "weather-temp",
+            y_align: Clutter.ActorAlign.CENTER,
+          }),
+        );
 
-        const infoBox = new St.BoxLayout({ vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER });
-        infoBox.add_child(new St.Label({ text: result.description, style_class: "weather-desc" }));
-        infoBox.add_child(new St.Label({ text: result.city, style_class: "weather-city" }));
+        const infoBox = new St.BoxLayout({
+          vertical: true,
+          x_expand: true,
+          y_align: Clutter.ActorAlign.CENTER,
+        });
+        infoBox.add_child(
+          new St.Label({
+            text: result.description,
+            style_class: "weather-desc",
+          }),
+        );
+        infoBox.add_child(
+          new St.Label({ text: result.city, style_class: "weather-city" }),
+        );
         topRow.add_child(infoBox);
 
         const card = new St.BoxLayout({ vertical: true, x_expand: true });
         card.add_child(topRow);
-        card.add_child(new St.Label({ text: result.details, style_class: "weather-details", x_expand: true }));
+        card.add_child(
+          new St.Label({
+            text: result.details,
+            style_class: "weather-details",
+            x_expand: true,
+          }),
+        );
         row.set_child(card);
       } else {
         if (result.type === "calc") row.add_style_class_name("answer");
 
         const rowBox = new St.BoxLayout({ vertical: false, x_expand: true });
         const icon = result.gicon
-          ? new St.Icon({ gicon: result.gicon, icon_size: 24, style_class: "spotlight-result-icon" })
-          : new St.Icon({ icon_name: result.icon || "system-search-symbolic", icon_size: 24, style_class: "spotlight-result-icon" });
+          ? new St.Icon({
+              gicon: result.gicon,
+              icon_size: 24,
+              style_class: "spotlight-result-icon",
+            })
+          : new St.Icon({
+              icon_name: result.icon || "system-search-symbolic",
+              icon_size: 24,
+              style_class: "spotlight-result-icon",
+            });
         rowBox.add_child(icon);
-        rowBox.add_child(new St.Label({
-          text: result.label,
-          style_class: "spotlight-result-label",
-          y_align: Clutter.ActorAlign.CENTER,
-          x_expand: true,
-        }));
+        rowBox.add_child(
+          new St.Label({
+            text: result.label,
+            style_class: "spotlight-result-label",
+            y_align: Clutter.ActorAlign.CENTER,
+            x_expand: true,
+          }),
+        );
         row.set_child(rowBox);
       }
 
@@ -1216,11 +1317,14 @@ export default class SearchBar extends Extension {
   // --- Layout ---
 
   _repositionContainer() {
-    const containerWidth = 640;
+    const containerWidth = this._settings.get_int("bar-width");
+    const positionKey = this._settings.get_string("bar-position");
+    const fractionMap = { top: 0.25, center: 0.4, bottom: 0.65 };
+    const fraction = fractionMap[positionKey] ?? 0.25;
     this._container.set_size(containerWidth, -1);
     this._container.set_position(
       Math.floor((global.stage.width - containerWidth) / 2),
-      Math.floor(global.stage.height / 4),
+      Math.floor(global.stage.height * fraction),
     );
   }
 
