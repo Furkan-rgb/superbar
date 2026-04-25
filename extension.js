@@ -75,15 +75,33 @@ export default class SearchBar extends Extension {
     });
 
     this._entry = new St.Entry({
-      hint_text: "Search apps, calculate...",
       style_class: "spotlight-entry",
       can_focus: true,
       x_expand: true,
       y_align: Clutter.ActorAlign.CENTER,
     });
 
+    this._placeholder = new St.Label({
+      style_class: "spotlight-entry-placeholder",
+      text: "Search apps, calculate...",
+      x_expand: true,
+      y_align: Clutter.ActorAlign.CENTER,
+      x_align: Clutter.ActorAlign.START,
+      reactive: false,
+      can_focus: false,
+    });
+
+    this._entryBox = new St.Widget({
+      style_class: "spotlight-entry-box",
+      x_expand: true,
+      layout_manager: new Clutter.BinLayout(),
+    });
+    this._entryBox.add_child(this._entry);
+    this._entryBox.add_child(this._placeholder);
+    this._placeholder.visible = true;
+
     this._inputRow.add_child(this._icon);
-    this._inputRow.add_child(this._entry);
+    this._inputRow.add_child(this._entryBox);
     this._container.add_child(this._inputRow);
 
     this._resultsBox = new St.BoxLayout({
@@ -356,6 +374,7 @@ export default class SearchBar extends Extension {
 
   _onTextChanged() {
     const text = this._entry.get_text().trim();
+    this._placeholder.visible = text.length === 0;
 
     if (this._searchTimeout) {
       GLib.source_remove(this._searchTimeout);
