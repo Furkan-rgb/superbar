@@ -2,7 +2,7 @@
 
 A keyboard-driven, system-wide launcher and command bar for GNOME Shell — inspired by macOS Spotlight.
 
-Open it from anywhere with **Ctrl+Alt+Space**.
+Open it from anywhere with **Alt+Space**.
 
 ![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-49%2B-blue)
 ![License](https://img.shields.io/badge/license-GPL--2.0-green)
