@@ -52,7 +52,8 @@ export default class SearchBar extends Extension {
     this._session = new Soup.Session();
     this._clipboard = St.Clipboard.get_default();
     this._clipboardHistoryLimit = 50;
-    this._clipboardHistory = this._loadClipboardHistory();
+    this._clipboardHistory = [];
+    this._loadClipboardHistory();
 
     this._container = new St.BoxLayout({
       style_class: "spotlight-container",
@@ -242,6 +243,18 @@ export default class SearchBar extends Extension {
       this._container.destroy();
       this._container = null;
     }
+
+    if (this._session) {
+      this._session.abort();
+      this._session = null;
+    }
+
+    this._icon = null;
+    this._entry = null;
+    this._inputRow = null;
+    this._resultsBox = null;
+    this._resultsScroll = null;
+    this._resultsClip = null;
   }
 
   // --- Open / Close ---
@@ -443,19 +456,20 @@ export default class SearchBar extends Extension {
   }
 
   _loadClipboardHistory() {
-    try {
-      const [success, contents] = GLib.file_get_contents(
-        this._getClipboardHistoryPath(),
-      );
-      if (!success) return [];
-
-      const data = JSON.parse(new TextDecoder().decode(contents));
-      if (!Array.isArray(data)) return [];
-
-      return data.filter((entry) => typeof entry?.text === "string").slice(0, this._clipboardHistoryLimit);
-    } catch (e) {
-      return [];
-    }
+    const file = Gio.File.new_for_path(this._getClipboardHistoryPath());
+    file.load_contents_async(null, (_file, res) => {
+      try {
+        const [success, contents] = file.load_contents_finish(res);
+        if (!success) return;
+        const data = JSON.parse(new TextDecoder().decode(contents));
+        if (!Array.isArray(data)) return;
+        this._clipboardHistory = data
+          .filter((entry) => typeof entry?.text === "string")
+          .slice(0, this._clipboardHistoryLimit);
+      } catch (_e) {
+        // history file missing or corrupt; start fresh
+      }
+    });
   }
 
   _saveClipboardHistory() {
@@ -464,8 +478,8 @@ export default class SearchBar extends Extension {
         this._getClipboardHistoryPath(),
         JSON.stringify(this._clipboardHistory),
       );
-    } catch (e) {
-      console.log(`[Search Bar] Clipboard history save error: ${e.message}`);
+    } catch (_e) {
+      // save errors are non-fatal; silently ignore
     }
   }
 
@@ -767,15 +781,14 @@ export default class SearchBar extends Extension {
           return;
         }
 
-        console.log(`[Search Bar] No available executable for action: ${result.label}`);
-        return;
+        return; // no available executable for this action
       }
 
       if (result.cmd) {
         GLib.spawn_command_line_async(result.cmd);
       }
     } catch (e) {
-      console.log(`[Search Bar] Action failed (${result.label}): ${e.message}`);
+      console.error(`[Superbar] Action failed (${result.label}): ${e.message}`);
     }
   }
 
@@ -945,8 +958,8 @@ export default class SearchBar extends Extension {
           },
         ]);
       }
-    } catch (e) {
-      console.log(`Dictionary error: ${e.message}`);
+    } catch (_e) {
+      // dictionary lookup failed; silently ignore
     }
   }
 
@@ -994,8 +1007,8 @@ export default class SearchBar extends Extension {
           },
         ]);
       }
-    } catch (e) {
-      console.log(`[Search Bar] Currency error: ${e.message}`);
+    } catch (_e) {
+      // currency fetch failed; silently ignore
     }
   }
 
