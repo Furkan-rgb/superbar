@@ -210,7 +210,7 @@ export default class SuperbarPreferences extends ExtensionPreferences {
 
     const coffeeRow = new Adw.ActionRow({
       title: "Buy Me a Coffee ☕",
-      subtitle: "buymeacoffee.com/furkan.rgb",
+      subtitle: "buymeacoffee.com/furkan12",
       activatable: true,
     });
     coffeeRow.add_suffix(
@@ -221,7 +221,7 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     );
     coffeeRow.connect("activated", () =>
       Gio.AppInfo.launch_default_for_uri(
-        "https://buymeacoffee.com/furkan.rgb",
+        "https://buymeacoffee.com/furkan12",
         null
       )
     );
