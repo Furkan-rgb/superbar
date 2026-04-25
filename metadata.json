@@ -4,5 +4,6 @@
   "uuid": "superbar@Furkan-rgb.github.io",
   "version": 1,
   "url": "https://github.com/Furkan-rgb/superbar",
+  "settings-schema": "org.gnome.shell.extensions.superbar",
   "shell-version": ["49", "50"]
 }
