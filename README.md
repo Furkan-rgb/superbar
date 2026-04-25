@@ -44,7 +44,7 @@ Open it from anywhere with **Alt+Space**.
 
 > **Note:** The extension is currently under review by the GNOME Extensions team and is not yet available on [extensions.gnome.org](https://extensions.gnome.org). In the meantime, please use the manual installation method below.
 
-~~Install from [extensions.gnome.org](https://extensions.gnome.org) — search for **Superbar**.~~
+[Superbar on Gnome Extensions Marketplace](https://extensions.gnome.org/extension/9778/superbar/) - Soon!
 
 ### Manual
 
