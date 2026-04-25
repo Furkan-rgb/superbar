@@ -11,11 +11,11 @@ Open it from anywhere with **Ctrl+Alt+Space**.
 
 ## Screenshots
 
-| | |
-|---|---|
-| ![Dark mode](screenshots/superbar_dark.png) | ![App launcher](screenshots/superbar_dark_app.png) |
-| ![Weather](screenshots/superbar_dark_weather.png) | ![Math](screenshots/superbar_dark_math.png) |
-| ![Currency](screenshots/superbar_dark_currency.png) | ![Actions](screenshots/superbar_actions.png) |
+|                                                          |                                                        |
+| -------------------------------------------------------- | ------------------------------------------------------ |
+| ![Dark mode](screenshots/superbar_dark.png)              | ![App launcher](screenshots/superbar_dark_app.png)     |
+| ![Weather](screenshots/superbar_dark_weather.png)        | ![Math](screenshots/superbar_dark_math.png)            |
+| ![Currency](screenshots/superbar_dark_currency.png)      | ![Actions](screenshots/superbar_actions.png)           |
 | ![Light weather](screenshots/superbar_light_weather.png) | ![Light folder](screenshots/superbar_light_folder.png) |
 
 ---
