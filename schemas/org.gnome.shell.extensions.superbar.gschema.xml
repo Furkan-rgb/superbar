@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.superbar" path="/org/gnome/shell/extensions/superbar/">
+    <key name="toggle-shortcut" type="as">
+      <default><![CDATA[['<Ctrl><Alt>space']]]></default>
+      <summary>Toggle Superbar</summary>
+      <description>Shortcut to open and close Superbar.</description>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,5 @@
+# Compiled GSettings schema binary — generated locally by glib-compile-schemas
+schemas/gschemas.compiled
+
+# Editor backups
+*.bak
