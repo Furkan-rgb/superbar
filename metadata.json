@@ -1,0 +1,9 @@
+{
+  "name": "Superbar",
+  "description": "Superbar is a keyboard-driven, system-wide launcher and command bar for GNOME Shell",
+  "uuid": "superbar@Furkan-rgb.github.io",
+  "version": 1,
+  "url": "https://github.com/Furkan-rgb/superbar",
+  "settings-schema": "org.gnome.shell.extensions.superbar",
+  "shell-version": ["49", "50"]
+}
