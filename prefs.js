@@ -303,6 +303,24 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     );
     appearanceGroup.add(maxResultsRow);
 
+    const themeLabels = ["System", "Light", "Dark"];
+    const themeKeys = ["system", "light", "dark"];
+    const themeRow = new Adw.ComboRow({
+      title: "Color Theme",
+      subtitle: "Follow GNOME Shell or use a fixed light or dark style",
+      model: Gtk.StringList.new(themeLabels),
+    });
+    const currentTheme = settings.get_string("theme-mode");
+    const currentThemeIndex = themeKeys.indexOf(currentTheme);
+    themeRow.set_selected(currentThemeIndex >= 0 ? currentThemeIndex : 0);
+    themeRow.connect("notify::selected", () => {
+      settings.set_string(
+        "theme-mode",
+        themeKeys[themeRow.selected] ?? "system",
+      );
+    });
+    appearanceGroup.add(themeRow);
+
     const barWidthRow = new Adw.SpinRow({
       title: "Bar Width",
       subtitle: "Width of the Superbar in pixels",

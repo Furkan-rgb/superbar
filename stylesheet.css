@@ -7,6 +7,9 @@
     border-radius: 30px;
     padding: 6px 12px;
 
+    /* Fallback text color; overridden at runtime with the shell theme's
+       foreground color when its variant matches. Result labels inherit it. */
+    color: rgba(0, 0, 0, 0.9);
     background-color: rgba(250, 250, 250, 0.90);
     border: 1px solid rgba(0, 0, 0, 0.08);
     box-shadow: 0px 16px 32px rgba(0, 0, 0, 0.08);
@@ -22,9 +25,9 @@
 }
 
 .spotlight-entry {
-    color: rgba(0, 0, 0, 0.9);
     font-size: 22pt;
     font-weight: 300;
+    color: rgba(0, 0, 0, 0.9);
     caret-color: #007aff;
     caret-size: 2px;
 }
@@ -111,17 +114,18 @@
  * ===================================================================== */
 
 .dark-mode.spotlight-container {
+    color: rgba(255, 255, 255, 0.95);
     background-color: rgba(30, 30, 30, 0.85);
     border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0px 24px 48px rgba(0, 0, 0, 0.4);
 }
 
-.dark-mode .spotlight-icon {
-    color: rgba(255, 255, 255, 0.6);
-}
-
 .dark-mode .spotlight-entry {
     color: rgba(255, 255, 255, 0.95);
+}
+
+.dark-mode .spotlight-icon {
+    color: rgba(255, 255, 255, 0.6);
 }
 
 .dark-mode .spotlight-entry:selected {

@@ -14,12 +14,20 @@ import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
+const RESULTS_REVEAL_ANIMATION_MS = 85;
+const RESULTS_COLLAPSE_ANIMATION_MS = 45;
+const STRONG_LOCAL_MATCH_SCORE = 600;
+// Local results below this relevance score are hidden entirely (only the web
+// search remains). Substring/word/prefix matches clear it; scattered
+// subsequence matches — the usual source of unrelated results — do not.
+const MINIMUM_LOCAL_MATCH_SCORE = 500;
 const RESUMABLE_SESSION_TTL_MS = 5 * 60 * 1000;
 const MONITOR_EDGE_MARGIN = 24;
 const RANKING_HISTORY_LIMIT = 50;
 const RANKING_HISTORY_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const SOURCE_RANK_BONUS = {
   app: 100,
+  appAction: 60,
   window: 80,
   folder: 35,
   file: 10,
@@ -261,6 +269,11 @@ export default class SearchBar extends Extension {
     );
     this._refreshAppCache();
     this._windowTracker = Shell.WindowTracker.get_default();
+    this._windowTracker.connectObject(
+      "tracked-windows-changed",
+      () => this._refreshCurrentSearch(),
+      this,
+    );
     this._folderCache = SYSTEM_FOLDERS.map((name) => ({
       type: "file",
       label: name,
@@ -404,6 +417,11 @@ export default class SearchBar extends Extension {
       this,
     );
     Main.sessionMode.connectObject("updated", () => this._updateTheme(), this);
+    St.ThemeContext.get_for_stage(global.stage).connectObject(
+      "changed",
+      () => this._updateTheme(),
+      this,
+    );
     Main.layoutManager.connectObject(
       "monitors-changed",
       () => this._onMonitorConfigurationChanged(),
@@ -421,6 +439,8 @@ export default class SearchBar extends Extension {
       () => this._repositionContainer(),
       "changed::bar-position",
       () => this._repositionContainer(),
+      "changed::theme-mode",
+      () => this._updateTheme(),
       "changed::clipboard-monitor-enabled",
       () => this._startClipboardMonitoring(),
       "changed::clipboard-history-clear-request",
@@ -440,7 +460,7 @@ export default class SearchBar extends Extension {
     Main.wm.addKeybinding(
       "toggle-shortcut",
       this._settings,
-      Meta.KeyBindingFlags.NONE,
+      Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
       Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
       this._toggleSearch.bind(this),
     );
@@ -457,9 +477,11 @@ export default class SearchBar extends Extension {
 
     this._settings?.disconnectObject(this);
     this._appSystem?.disconnectObject(this);
+    this._windowTracker?.disconnectObject(this);
     this._entry?.clutter_text.disconnectObject(this);
     this._shellSettings?.disconnectObject(this);
     Main.sessionMode.disconnectObject(this);
+    St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
     if (this._container) {
       Main.layoutManager.disconnectObject(this._container);
       global.display.disconnectObject(this._container);
@@ -581,7 +603,13 @@ export default class SearchBar extends Extension {
   }
 
   _getResultRankingKey(result) {
-    if (result.appId) return `app:${result.appId}`;
+    const appIdentity = result.appIdentity ?? result.appId;
+    if (result.type === "app" && appIdentity) {
+      return `app:${result.appAction ?? "launch"}:${appIdentity}`;
+    }
+    if (result.type === "window" && appIdentity) {
+      return `app:switch:${appIdentity}`;
+    }
     if (result.type !== "system") return null;
 
     const actionId =
@@ -1044,21 +1072,42 @@ export default class SearchBar extends Extension {
         ],
       ),
     );
-    const combinedResults = [
-      ...localResults,
-      {
-        type: "web",
-        label: text,
-        subtitle: "Search the web",
-        icon: "web-browser-symbolic",
-        query: text,
-      },
-    ];
+    const maxResults = this._settings.get_int("max-results");
+    const webResult = {
+      type: "web",
+      label: text,
+      subtitle: "Search the web",
+      icon: "web-browser-symbolic",
+      query: text,
+    };
+    const strongLocalResults = [];
+    const weakLocalResults = [];
 
-    return combinedResults.slice(
-      0,
-      this._settings.get_int("max-results"),
-    );
+    for (const result of localResults) {
+      const relevance = result._matchScore ?? -1;
+      delete result._matchScore;
+
+      // Hide results that only matched weakly (e.g. a scattered subsequence
+      // buried in an app's description) so unrelated entries don't appear.
+      if (relevance < MINIMUM_LOCAL_MATCH_SCORE) continue;
+
+      const matchScore = Math.max(
+        this._scoreSearchMatch(result.label ?? "", text),
+        this._scoreSearchMatch(result.subtitle ?? "", text),
+      );
+
+      if (matchScore >= STRONG_LOCAL_MATCH_SCORE) {
+        strongLocalResults.push(result);
+      } else {
+        weakLocalResults.push(result);
+      }
+    }
+
+    return [
+      ...strongLocalResults.slice(0, Math.max(0, maxResults - 1)),
+      webResult,
+      ...weakLocalResults,
+    ].slice(0, maxResults);
   }
 
   _parseClipboardQuery(text) {
@@ -1188,16 +1237,45 @@ export default class SearchBar extends Extension {
   }
 
   _rankGenericResults(results) {
-    return results
-      .map((result, index) => ({
-        result,
-        index,
-        score:
-          result._matchScore +
-          (SOURCE_RANK_BONUS[result._source] ?? 0) +
-          (result._contextBoost ?? 0) +
-          this._getAdaptiveRankingBoost(result),
-      }))
+    const rankedResults = results.map((result, index) => ({
+      result,
+      index,
+      score:
+        result._matchScore +
+        (SOURCE_RANK_BONUS[result._source] ?? 0) +
+        (result._contextBoost ?? 0) +
+        this._getAdaptiveRankingBoost(result),
+    }));
+    const lowestWindowScoreByApp = new Map();
+
+    for (const entry of rankedResults) {
+      if (entry.result.type !== "window") continue;
+
+      const identity = entry.result.appIdentity ?? entry.result.appId;
+      if (!identity) continue;
+
+      const currentScore = lowestWindowScoreByApp.get(identity);
+      if (currentScore === undefined || entry.score < currentScore) {
+        lowestWindowScoreByApp.set(identity, entry.score);
+      }
+    }
+
+    for (const entry of rankedResults) {
+      if (
+        entry.result.type !== "app" ||
+        entry.result.appAction !== "new-window"
+      ) {
+        continue;
+      }
+
+      const identity = entry.result.appIdentity ?? entry.result.appId;
+      const lowestWindowScore = lowestWindowScoreByApp.get(identity);
+      if (lowestWindowScore !== undefined) {
+        entry.score = Math.min(entry.score, lowestWindowScore - 1);
+      }
+    }
+
+    return rankedResults
       .sort((a, b) => {
         const scoreDifference = b.score - a.score;
         if (scoreDifference !== 0) return scoreDifference;
@@ -1222,8 +1300,9 @@ export default class SearchBar extends Extension {
       .map(({ result }) => {
         const publicResult = { ...result };
         delete publicResult._source;
-        delete publicResult._matchScore;
         delete publicResult._contextBoost;
+        // _matchScore is kept so _buildGenericResults can apply a relevance
+        // floor; it is stripped there once the results are partitioned.
         return publicResult;
       });
   }
@@ -1272,13 +1351,19 @@ export default class SearchBar extends Extension {
         const description = appInfo.get_description?.()?.trim() ?? "";
         const keywords = appInfo.get_keywords?.() ?? [];
         const appId = appInfo.get_id();
+        const appIdentity = this._getAppIdentity(
+          appInfo,
+          appId,
+          label,
+        );
 
         return {
           type: "app",
           label,
-          subtitle: description || "Application",
           gicon: appInfo.get_icon(),
           appId,
+          appIdentity,
+          classKeys: this._getAppWindowClassKeys(appInfo, appId),
           searchText: [
             label,
             appInfo.get_name?.(),
@@ -1292,6 +1377,76 @@ export default class SearchBar extends Extension {
         };
       })
       .filter((app) => Boolean(app.appId));
+  }
+
+  _getAppIdentity(appInfo, fallbackId = "", fallbackName = "") {
+    const name =
+      appInfo?.get_display_name?.() ??
+      appInfo?.get_name?.() ??
+      fallbackName;
+    const commandline =
+      appInfo?.get_commandline?.() ??
+      appInfo?.get_executable?.() ??
+      "";
+    const startupWmClass = appInfo?.get_startup_wm_class?.() ?? "";
+    const normalizedName = normalizeSearchText(name);
+    const normalizedCommandline = normalizeSearchText(commandline);
+    const normalizedWmClass = normalizeSearchText(startupWmClass);
+
+    if (normalizedCommandline || normalizedWmClass) {
+      return [
+        normalizedName,
+        normalizedCommandline,
+        normalizedWmClass,
+      ].join("\u001f");
+    }
+
+    return fallbackId || normalizedName;
+  }
+
+  _getShellAppIdentity(app) {
+    if (!app) return "";
+
+    return this._getAppIdentity(
+      app.get_app_info?.(),
+      app.get_id?.() ?? "",
+      app.get_name?.() ?? "",
+    );
+  }
+
+  // Candidate WM_CLASS keys for an installed app, used to match open windows
+  // directly when GNOME fails to associate them with the app's ShellApp
+  // (common for Chrome/Chromium/Electron apps and PWAs).
+  _getAppWindowClassKeys(appInfo, appId = "") {
+    const keys = new Set();
+    const add = (value) => {
+      const normalized = normalizeSearchText(value ?? "");
+      if (normalized) keys.add(normalized);
+    };
+
+    add(appInfo?.get_startup_wm_class?.());
+
+    const base = String(appId).replace(/\.desktop$/, "");
+    add(base);
+    add(base.split(".").pop());
+
+    const executable = appInfo?.get_executable?.() ?? "";
+    if (executable) add(executable.split("/").pop());
+
+    return [...keys];
+  }
+
+  _getWindowClassKeys(window) {
+    const keys = [];
+    const push = (value) => {
+      const normalized = normalizeSearchText(value ?? "");
+      if (normalized) keys.push(normalized);
+    };
+
+    push(window.get_wm_class?.());
+    push(window.get_wm_class_instance?.());
+
+    return keys;
   }
 
   _getShellAppSearchScores(text) {
@@ -1316,48 +1471,148 @@ export default class SearchBar extends Extension {
     const targetMonitor =
       this._activeMonitorIndex ?? this._getTargetMonitorIndex();
     const shellSearchScores = this._getShellAppSearchScores(text);
+    const runningAppsByIdentity = new Map();
+    // MRU-ordered so the first matched window is the most recently used.
+    const orderedWindows = global.display.get_tab_list(
+      Meta.TabList.NORMAL_ALL,
+      null,
+    );
+    const searchableWindows = new Set(orderedWindows);
+    const windowsByClass = new Map();
+    for (const window of orderedWindows) {
+      for (const key of this._getWindowClassKeys(window)) {
+        const bucket = windowsByClass.get(key);
+        if (bucket) bucket.push(window);
+        else windowsByClass.set(key, [window]);
+      }
+    }
 
-    return (this._appCache ?? [])
-      .map((app) => {
-        const labelScore = this._scoreSearchMatch(app.label, text);
-        const metadataScore = this._scoreSearchMatch(app.searchText, text);
-        const matchScore = Math.max(
-          labelScore,
-          metadataScore < 0 ? -1 : metadataScore - 80,
-          shellSearchScores.get(app.appId) ?? -1,
-        );
-        const shellApp = this._appSystem.lookup_app(app.appId);
-        const appWindows = shellApp?.get_windows() ?? [];
-        let contextBoost = 0;
+    for (const runningApp of this._appSystem.get_running?.() ?? []) {
+      const identity = this._getShellAppIdentity(runningApp);
+      if (!identity) continue;
 
-        if (appWindows.length > 0) contextBoost += 45;
-        if (shellApp?.is_on_workspace(activeWorkspace)) contextBoost += 20;
-        if (
-          appWindows.some(
-            (window) => window.get_monitor() === targetMonitor,
-          )
-        ) {
-          contextBoost += 15;
+      const existing = runningAppsByIdentity.get(identity);
+      if (
+        !existing ||
+        runningApp.get_windows().length > existing.get_windows().length
+      ) {
+        runningAppsByIdentity.set(identity, runningApp);
+      }
+    }
+
+    return (this._appCache ?? []).flatMap((app) => {
+      const labelScore = this._scoreSearchMatch(app.label, text);
+      const metadataScore = this._scoreSearchMatch(app.searchText, text);
+      const matchScore = Math.max(
+        labelScore,
+        metadataScore < 0 ? -1 : metadataScore - 80,
+        shellSearchScores.get(app.appId) ?? -1,
+      );
+      if (matchScore < 0) return [];
+
+      const shellApp = this._appSystem.lookup_app(app.appId);
+      const equivalentRunningApp = runningAppsByIdentity.get(
+        app.appIdentity,
+      );
+      const actionApp =
+        shellApp?.get_windows().length > 0
+          ? shellApp
+          : equivalentRunningApp ?? shellApp;
+
+      // Start with the windows GNOME associates with the app, then add any
+      // whose WM_CLASS matches — this recovers windows for apps GNOME didn't
+      // link to their .desktop file (e.g. Chrome). Re-ordered by MRU.
+      const matchedWindows = new Set(
+        (actionApp?.get_windows() ?? []).filter((window) =>
+          searchableWindows.has(window),
+        ),
+      );
+      for (const key of app.classKeys ?? []) {
+        for (const window of windowsByClass.get(key) ?? []) {
+          matchedWindows.add(window);
         }
+      }
+      const appWindows = orderedWindows.filter((window) =>
+        matchedWindows.has(window),
+      );
+      let contextBoost = 0;
 
-        return {
-          type: app.type,
+      if (appWindows.length > 0) contextBoost += 45;
+      if (actionApp?.is_on_workspace(activeWorkspace)) contextBoost += 20;
+      if (
+        appWindows.some(
+          (window) => window.get_monitor() === targetMonitor,
+        )
+      ) {
+        contextBoost += 15;
+      }
+
+      const results = [];
+      if (appWindows.length > 0) {
+        results.push({
+          type: "app",
           label: app.label,
-          subtitle: app.subtitle,
+          subtitle: "Switch to active window",
           gicon: app.gicon,
           appId: app.appId,
+          appIdentity: app.appIdentity,
+          appAction: "activate",
+          shellApp: actionApp,
+          activateWindow: appWindows[0] ?? null,
           _source: "app",
           _matchScore: matchScore,
           _contextBoost: contextBoost,
-        };
-      })
-      .filter((app) => app._matchScore >= 0);
+        });
+
+        if (actionApp?.can_open_new_window?.()) {
+          results.push({
+            type: "app",
+            label: `New ${app.label} Window`,
+            subtitle: "Open another window",
+            gicon: app.gicon,
+            appId: app.appId,
+            appIdentity: app.appIdentity,
+            appAction: "new-window",
+            shellApp: actionApp,
+            _source: "appAction",
+            _matchScore: matchScore,
+            _contextBoost: 0,
+          });
+        }
+
+        return results;
+      }
+
+      return [{
+        type: app.type,
+        label: app.label,
+        subtitle: "Open application",
+        gicon: app.gicon,
+        appId: app.appId,
+        appIdentity: app.appIdentity,
+        appAction: "launch",
+        shellApp: actionApp,
+        _source: "app",
+        _matchScore: matchScore,
+        _contextBoost: contextBoost,
+      }];
+    });
   }
 
   _dedupeResults(results) {
     const seenUris = new Set();
+    const seenAppActions = new Set();
 
     return results.filter((result) => {
+      if (result.type === "app") {
+        const identity = result.appIdentity ?? result.appId;
+        const key = `${identity}\u001f${result.appAction ?? "launch"}`;
+        if (seenAppActions.has(key)) return false;
+
+        seenAppActions.add(key);
+        return true;
+      }
+
       if (!result.uri) return true;
       if (seenUris.has(result.uri)) return false;
 
@@ -1371,26 +1626,104 @@ export default class SearchBar extends Extension {
     const activeWorkspace = global.workspace_manager.get_active_workspace();
     const targetMonitor =
       this._activeMonitorIndex ?? this._getTargetMonitorIndex();
+    const windowData = windows.map((window, mruIndex) => {
+      const title = window.get_title()?.trim() ?? "";
+      const app = this._windowTracker.get_window_app(window);
+      const appName = app?.get_name()?.trim() ?? "";
+      const appId = app?.get_id() ?? null;
+      const appIdentity = this._getShellAppIdentity(app);
+      const label = title || appName || "Untitled window";
+      const appKey =
+        appIdentity || appId || normalizeSearchText(appName) || "unknown";
 
-    return windows
-      .map((w, mruIndex) => {
-        const title = w.get_title() ?? "";
-        const app = this._windowTracker.get_window_app(w);
-        const appName = app?.get_name() ?? "";
+      return {
+        window,
+        mruIndex,
+        title,
+        app,
+        appName,
+        appId,
+        appIdentity,
+        label,
+        duplicateKey: `${appKey}\u001f${normalizeSearchText(label)}`,
+      };
+    });
+    const duplicateCounts = new Map();
+    const duplicateIndexes = new Map();
+    const launchableAppIdentities = new Set(
+      (this._appCache ?? []).map((app) => app.appIdentity),
+    );
+
+    for (const data of windowData) {
+      duplicateCounts.set(
+        data.duplicateKey,
+        (duplicateCounts.get(data.duplicateKey) ?? 0) + 1,
+      );
+    }
+
+    return windowData
+      .map((data) => {
+        const {
+          window,
+          mruIndex,
+          title,
+          app,
+          appName,
+          appId,
+          appIdentity,
+          label,
+          duplicateKey,
+        } = data;
         const titleScore = this._scoreSearchMatch(title, text);
         const appScore = this._scoreSearchMatch(appName, text);
         let contextBoost = Math.max(0, 24 - mruIndex * 3);
 
-        if (w.get_workspace() === activeWorkspace) contextBoost += 45;
-        if (w.get_monitor() === targetMonitor) contextBoost += 20;
+        if (appScore >= 0 && launchableAppIdentities.has(appIdentity)) {
+          return null;
+        }
+
+        if (window.get_workspace() === activeWorkspace) contextBoost += 45;
+        if (window.get_monitor() === targetMonitor) contextBoost += 20;
+
+        const locationParts = [];
+        const workspace = window.get_workspace();
+        if (workspace === activeWorkspace) {
+          locationParts.push("Current workspace");
+        } else if (workspace) {
+          locationParts.push(`Workspace ${workspace.index() + 1}`);
+        }
+
+        if ((Main.layoutManager.monitors?.length ?? 0) > 1) {
+          locationParts.push(`Monitor ${window.get_monitor() + 1}`);
+        }
+
+        const duplicateCount = duplicateCounts.get(duplicateKey) ?? 1;
+        if (duplicateCount > 1) {
+          const duplicateIndex =
+            (duplicateIndexes.get(duplicateKey) ?? 0) + 1;
+          duplicateIndexes.set(duplicateKey, duplicateIndex);
+          locationParts.push(
+            `Window ${duplicateIndex} of ${duplicateCount}`,
+          );
+        }
+
+        const repeatsAppName =
+          normalizeSearchText(label) === normalizeSearchText(appName);
+        const actionLabel =
+          appName && !repeatsAppName
+            ? `Switch to ${appName}`
+            : "Switch to open window";
+        const subtitle = [actionLabel, ...locationParts].join(" · ");
 
         return {
           type: "window",
-          label: title || appName || "Untitled window",
-          subtitle: appName ? `${appName} · Open window` : "Open window",
+          label,
+          subtitle,
+          gicon: app?.get_icon?.() ?? null,
           icon: "go-jump-symbolic",
-          window: w,
-          appId: app?.get_id() ?? null,
+          window,
+          appId,
+          appIdentity,
           _source: "window",
           _matchScore: Math.max(
             titleScore,
@@ -1399,7 +1732,7 @@ export default class SearchBar extends Extension {
           _contextBoost: contextBoost,
         };
       })
-      .filter((window) => window._matchScore >= 0);
+      .filter((window) => window && window._matchScore >= 0);
   }
 
   _searchSystemCommands(text) {
@@ -1882,7 +2215,12 @@ export default class SearchBar extends Extension {
 
     switch (first.type) {
       case "app":
-        return first.appId === second.appId;
+        return (
+          (first.appIdentity ?? first.appId) ===
+            (second.appIdentity ?? second.appId) &&
+          (first.appAction ?? "launch") ===
+            (second.appAction ?? "launch")
+        );
       case "window":
         return first.window === second.window;
       case "file":
@@ -2064,12 +2402,29 @@ export default class SearchBar extends Extension {
 
     if (result.type === "app") {
       try {
-        // Resolve the Shell.App to get proper window management (focus if running)
-        const shellApp = Shell.AppSystem.get_default().lookup_app(result.appId);
-        if (shellApp) {
+        const shellApp =
+          result.shellApp ??
+          Shell.AppSystem.get_default().lookup_app(result.appId);
+        if (result.appAction === "new-window") {
+          if (!shellApp?.open_new_window) {
+            throw new Error("Application cannot open a new window");
+          }
+          shellApp.open_new_window(-1);
+        } else if (result.appAction === "activate" && result.activateWindow) {
+          // Raise the matched window directly. shellApp.activate() would open a
+          // new instance for apps GNOME hasn't associated with their windows.
+          const window = result.activateWindow;
+          const timestamp = global.get_current_time();
+          const windowApp = this._windowTracker.get_window_app(window);
+          if (windowApp?.activate_window) {
+            windowApp.activate_window(window, timestamp);
+          } else {
+            window.get_workspace()?.activate(timestamp);
+            window.activate(timestamp);
+          }
+        } else if (shellApp) {
           shellApp.activate();
         } else {
-          // Fallback: launch via Gio directly
           const appInfo = GioUnix.DesktopAppInfo.new(result.appId);
           if (appInfo) appInfo.launch([], null);
         }
@@ -2093,8 +2448,15 @@ export default class SearchBar extends Extension {
     } else if (result.type === "system") {
       this._runSystemAction(result);
     } else if (result.type === "window") {
-      result.window.get_workspace().activate(global.get_current_time());
-      result.window.activate(global.get_current_time());
+      const timestamp = global.get_current_time();
+      const shellApp = this._windowTracker.get_window_app(result.window);
+
+      if (shellApp?.activate_window) {
+        shellApp.activate_window(result.window, timestamp);
+      } else {
+        result.window.get_workspace()?.activate(timestamp);
+        result.window.activate(timestamp);
+      }
     } else if (result.type === "file") {
       Gio.AppInfo.launch_default_for_uri(result.uri, null);
     }
@@ -2151,11 +2513,30 @@ export default class SearchBar extends Extension {
 
   _setResultsHeight(targetHeight) {
     const height = Math.max(0, targetHeight);
+    const currentHeight = Math.max(0, this._resultsClip.height);
+    const isShrinking = height < currentHeight;
+    const shouldAnimate =
+      this._searchOpen &&
+      currentHeight !== height &&
+      (currentHeight === 0 || isShrinking);
 
     this._resultsClip.remove_all_transitions();
     this._resultsScroll.set_height(height);
-    this._resultsClip.set_height(height);
-    this._repositionContainer();
+
+    if (!shouldAnimate) {
+      this._resultsClip.set_height(height);
+      this._repositionContainer();
+      return;
+    }
+
+    this._resultsClip.ease({
+      height,
+      time: isShrinking
+        ? RESULTS_COLLAPSE_ANIMATION_MS
+        : RESULTS_REVEAL_ANIMATION_MS,
+      transition: Clutter.AnimationMode.EASE_OUT_CUBIC,
+      onComplete: () => this._repositionContainer(),
+    });
   }
 
   // --- Layout ---
@@ -2250,10 +2631,47 @@ export default class SearchBar extends Extension {
   // --- Theme ---
 
   _updateTheme() {
-    if (Main.getStyleVariant() === "dark") {
+    const configuredMode = this._settings?.get_string("theme-mode");
+    let styleVariant;
+    if (configuredMode === "light" || configuredMode === "dark") {
+      styleVariant = configuredMode;
+    } else {
+      // "system" (the default): follow the OS Appearance setting directly.
+      // Main.getStyleVariant() reflects the shell chrome, not the system
+      // color-scheme, so it can't be trusted for this decision.
+      styleVariant =
+        St.Settings.get().color_scheme === St.SystemColorScheme.PREFER_DARK
+          ? "dark"
+          : "light";
+    }
+
+    if (styleVariant === "dark") {
       this._container.add_style_class_name("dark-mode");
     } else {
       this._container.remove_style_class_name("dark-mode");
     }
+
+    this._applySystemTextColor(styleVariant);
+  }
+
+  _applySystemTextColor(styleVariant) {
+    // The shell loads only one stylesheet variant at a time, so its foreground
+    // color is only meaningful when that variant matches the bar's. When they
+    // differ, fall back to the fixed colors in stylesheet.css.
+    if (Main.getStyleVariant() !== styleVariant) {
+      this._container.set_style(null);
+      this._entry?.set_style(null);
+      return;
+    }
+
+    const color = Main.uiGroup
+      .get_theme_node()
+      .get_foreground_color()
+      .to_string();
+
+    // Result labels inherit the container's inline color, but the entry's text
+    // does not pick up an ancestor's inline color, so it must be set directly.
+    this._container.set_style(`color: ${color};`);
+    this._entry?.set_style(`color: ${color};`);
   }
 }

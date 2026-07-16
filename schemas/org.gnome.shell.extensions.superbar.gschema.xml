@@ -49,5 +49,10 @@
       <summary>Vertical Position</summary>
       <description>Vertical position of the Superbar: top, center, or bottom.</description>
     </key>
+    <key name="theme-mode" type="s">
+      <default>'system'</default>
+      <summary>Color Theme</summary>
+      <description>Color theme for Superbar: system, light, or dark.</description>
+    </key>
   </schema>
 </schemalist>
