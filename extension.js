@@ -454,7 +454,6 @@ export default class SearchBar extends Extension {
     this._removeSource("_clipboardPollId");
     this._cancelPendingSearch();
     this._removeSource("_selectionScrollTimeoutId");
-    this._removeSource("_resultsHeightTimeoutId");
 
     this._settings?.disconnectObject(this);
     this._appSystem?.disconnectObject(this);
@@ -834,13 +833,12 @@ export default class SearchBar extends Extension {
     this._resumableSession = null;
     this._cancelPendingSearch();
     this._removeSource("_selectionScrollTimeoutId");
-    this._removeSource("_resultsHeightTimeoutId");
 
     if (this._entry.get_text().length > 0) {
       this._entry.set_text("");
     } else {
       this._clearResults();
-      this._animateResultsHeight(0);
+      this._setResultsHeight(0);
     }
   }
 
@@ -857,7 +855,7 @@ export default class SearchBar extends Extension {
 
     if (text.length === 0) {
       this._clearResults();
-      this._animateResultsHeight(0);
+      this._setResultsHeight(0);
       return;
     }
 
@@ -963,7 +961,7 @@ export default class SearchBar extends Extension {
 
   _scheduleRemoteSearch(text, generation, callback) {
     this._clearResults();
-    this._animateResultsHeight(0);
+    this._setResultsHeight(0);
 
     this._removeSource("_searchTimeout");
     this._searchTimeout = GLib.timeout_add(
@@ -1920,7 +1918,7 @@ export default class SearchBar extends Extension {
       : -1;
 
     if (results.length === 0) {
-      this._animateResultsHeight(0);
+      this._setResultsHeight(0);
       return;
     }
 
@@ -2036,25 +2034,17 @@ export default class SearchBar extends Extension {
     this._updateSelection();
 
     this._resultsBox.queue_relayout();
-    this._removeSource("_resultsHeightTimeoutId");
-    this._resultsHeightTimeoutId = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT,
-      0,
-      () => {
-        this._resultsHeightTimeoutId = null;
-        if (!this._resultsBox) return GLib.SOURCE_REMOVE;
-
-        const [, naturalHeight] = this._resultsBox.get_preferred_height(
-          this._resultsBox.width,
-        );
-        this._animateResultsHeight(Math.min(naturalHeight, 450));
-        return GLib.SOURCE_REMOVE;
-      },
+    const preferredWidth = Math.max(
+      1,
+      this._resultsBox.width,
+      this._container.width,
     );
+    const [, naturalHeight] =
+      this._resultsBox.get_preferred_height(preferredWidth);
+    this._setResultsHeight(Math.min(naturalHeight, 450));
   }
 
   _clearResults() {
-    this._removeSource("_resultsHeightTimeoutId");
     this._results = [];
     this._selectedIndex = -1;
     this._resultsBox.get_children().forEach((child) => {
@@ -2159,16 +2149,13 @@ export default class SearchBar extends Extension {
     ensureActorVisibleInScrollView(this._resultsScroll, row);
   }
 
-  _animateResultsHeight(targetHeight) {
-    this._resultsScroll.height = targetHeight;
-    this._resultsScroll.set_height(targetHeight);
+  _setResultsHeight(targetHeight) {
+    const height = Math.max(0, targetHeight);
+
     this._resultsClip.remove_all_transitions();
-    this._resultsClip.ease({
-      height: targetHeight,
-      time: 120,
-      transition: Clutter.AnimationMode.EASE_OUT_CUBIC,
-      onComplete: () => this._repositionContainer(),
-    });
+    this._resultsScroll.set_height(height);
+    this._resultsClip.set_height(height);
+    this._repositionContainer();
   }
 
   // --- Layout ---

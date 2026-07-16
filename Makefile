@@ -22,8 +22,8 @@ help:
 		"make disable" "Disable Superbar in the current Shell session" \
 		"make prefs" "Open Superbar preferences" \
 		"make status" "Show the installed extension state" \
-		"make nested" "Install and start a nested GNOME Shell" \
-		"make export" "Validate and export the ZIP to $(DESKTOP_DIR)/" \
+		"make nested" "Build, install, and start a fresh nested GNOME Shell" \
+		"make export" "Build/copy the release ZIP only; does not install it" \
 		"make release" "Alias for make export" \
 		"make clean" "Remove generated build files"
 

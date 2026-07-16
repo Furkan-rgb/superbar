@@ -78,17 +78,19 @@ make help
 make test       # validate, build, and verify the ZIP
 make install    # install the latest local build
 make nested     # install and start a fresh nested GNOME Shell
-make export     # export the upload-ready ZIP to ~/Desktop
+make export     # export the upload-ready ZIP to ~/Desktop; does not install
 ```
 
 The generated archive is always named
 `superbar@Furkan-rgb.github.io.shell-extension.zip`. `make export` writes it to
-the Desktop; override that destination when needed with
-`make DESKTOP_DIR=/path/to/output export`.
+the Desktop but does not update the installed extension. Override the export
+destination when needed with `make DESKTOP_DIR=/path/to/output export`.
 
-GNOME Shell caches extension modules, so use the nested session after code
-changes. Once it opens, enable Superbar and inspect its state from a terminal
-inside the nested desktop while in the repository directory:
+For development, close any existing nested Shell and run `make nested`. This
+packages and installs the current source before starting a fresh Shell process;
+disabling and re-enabling an extension does not reliably reload cached modules.
+Once it opens, enable Superbar and inspect its state from a terminal inside the
+nested desktop while in the repository directory:
 
 ```bash
 make enable
