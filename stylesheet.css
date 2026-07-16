@@ -4,9 +4,7 @@
 
 .spotlight-container {
     width: 600px;
-    border-radius: 30px; /* Reverted to your exact design specification */
-
-    /* UX MINIMALISM: Tightened the outer bounds significantly */
+    border-radius: 30px;
     padding: 6px 12px;
 
     background-color: rgba(250, 250, 250, 0.90);
@@ -15,7 +13,6 @@
 }
 
 .spotlight-input-row {
-    /* UX MINIMALISM: Pushes the magnifying glass right up against the text */
     spacing: 6px;
 }
 
@@ -26,7 +23,6 @@
 
 .spotlight-entry {
     color: rgba(0, 0, 0, 0.9);
-    font-family: "Inter", "Ubuntu", "Cantarell", sans-serif;
     font-size: 22pt;
     font-weight: 300;
     caret-color: #007aff;
@@ -44,33 +40,31 @@
     color: black;
 }
 
+.spotlight-entry StLabel.hint-text {
+    color: rgba(0, 0, 0, 0.38);
+}
+
 /* =====================================================================
  * 2. RESULTS AREA (Layout & Rows)
  * ===================================================================== */
 
 .spotlight-results-box {
     spacing: 2px;
-    /* UX MINIMALISM: Minimal internal gap before the results start */
     padding: 4px;
 }
 
 .spotlight-result-row {
     border-radius: 12px;
-
-    /* UX MINIMALISM: Shaved down to the absolute minimum needed so text doesn't hit the edges */
-    padding: 6px 10px;
+    padding: 7px 10px;
 
     background-color: transparent;
     border: 1px solid transparent;
     transition: none;
 }
 
-/* Hover effects completely removed per your request */
-
 .spotlight-result-row.selected {
-    /* A soft, borderless black overlay */
     background-color: rgba(0, 0, 0, 0.08);
-    border: 1px solid transparent; /* Keep transparent to prevent layout shifting */
+    border: 1px solid transparent;
 }
 
 .spotlight-result-row.inactive-selection {
@@ -79,18 +73,26 @@
 }
 
 .spotlight-result-icon {
-    /* UX MINIMALISM: Tighter spacing between icon and text in the list */
     margin-right: 10px;
 }
 
 .spotlight-result-label {
-    font-size: 14px;
+    font-size: 15px;
+    font-weight: 500;
+}
+
+.spotlight-result-text {
+    spacing: 1px;
+}
+
+.spotlight-result-subtitle {
+    font-size: 11px;
     font-weight: 400;
+    color: rgba(0, 0, 0, 0.48);
 }
 
 /* --- Prominent Answer Style --- */
 .spotlight-result-row.answer {
-    /* UX MINIMALISM: Reduced vertical padding, but kept enough to signify importance */
     padding: 12px 10px;
 }
 
@@ -127,13 +129,20 @@
     color: white;
 }
 
+.dark-mode .spotlight-entry StLabel.hint-text {
+    color: rgba(255, 255, 255, 0.38);
+}
+
+.dark-mode .spotlight-result-subtitle {
+    color: rgba(255, 255, 255, 0.48);
+}
+
 .dark-mode .spotlight-result-row.inactive-selection {
     background-color: rgba(255, 255, 255, 0.06);
     border: 1px solid transparent;
 }
 
 .dark-mode .spotlight-result-row.selected {
-    /* A soft, borderless white overlay */
     background-color: rgba(255, 255, 255, 0.12);
     border: 1px solid transparent;
 }
@@ -186,23 +195,19 @@
  * 5. SCROLLBAR REFINEMENTS
  * ===================================================================== */
 
-/* The invisible track the scrollbar slides on */
 .spotlight-results-scroll StScrollBar {
-    /* UX MINIMALISM: Pull the track away from the rounded corners */
-    margin-right: 8px;   /* Keep it off the right wall */
-    margin-top: 4px;     /* Keep it off the search bar divider */
-    margin-bottom: 24px; /* Crucial: Stops the bar before it hits the bottom 38px curve! */
+    margin-right: 8px;
+    margin-top: 4px;
+    margin-bottom: 24px;
 }
 
-/* The actual draggable pill (Light Mode) */
 .spotlight-results-scroll StScrollBar .v-handle {
-    background-color: rgba(0, 0, 0, 0.2); /* Soft transparent black */
-    border-radius: 6px; /* Full pill shape */
-    min-width: 6px;     /* Thin, sleek width */
-    border: none;       /* Strip default GNOME chunky borders */
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    min-width: 6px;
+    border: none;
 }
 
-/* The draggable pill (Dark Mode) */
 .dark-mode .spotlight-results-scroll StScrollBar .v-handle {
-    background-color: rgba(255, 255, 255, 0.25); /* Soft transparent white */
+    background-color: rgba(255, 255, 255, 0.25);
 }

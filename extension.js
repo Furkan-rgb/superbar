@@ -7,7 +7,104 @@ import Meta from "gi://Meta";
 import Shell from "gi://Shell";
 import Soup from "gi://Soup";
 import GLib from "gi://GLib";
+import Pango from "gi://Pango";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
+import * as SystemActions from "resource:///org/gnome/shell/misc/systemActions.js";
+import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
+
+const FILE_SEARCH_DELAY_MS = 80;
+const REMOTE_SEARCH_DELAY_MS = 220;
+const RESUMABLE_SESSION_TTL_MS = 5 * 60 * 1000;
+const SYSTEM_FOLDERS = [
+  "Downloads",
+  "Documents",
+  "Pictures",
+  "Videos",
+  "Music",
+];
+
+function evaluateMathExpression(expression) {
+  const compactExpression = expression.replace(/\s+/g, "");
+  const tokens =
+    compactExpression.match(/(?:\d+(?:\.\d*)?|\.\d+|[()+\-*/%^])/g) ?? [];
+
+  if (tokens.join("") !== compactExpression) return null;
+
+  let position = 0;
+
+  const parsePrimary = () => {
+    const token = tokens[position];
+
+    if (token === "(") {
+      position++;
+      const value = parseExpression();
+      if (tokens[position] !== ")")
+        throw new Error("Missing closing parenthesis");
+      position++;
+      return value;
+    }
+
+    if (token === undefined || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(token))
+      throw new Error("Expected a number");
+
+    position++;
+    return Number(token);
+  };
+
+  const parsePower = () => {
+    const left = parsePrimary();
+    if (tokens[position] !== "^") return left;
+
+    position++;
+    return left ** parseUnary();
+  };
+
+  const parseUnary = () => {
+    const token = tokens[position];
+    if (token === "+" || token === "-") {
+      position++;
+      const value = parseUnary();
+      return token === "-" ? -value : value;
+    }
+
+    return parsePower();
+  };
+
+  const parseTerm = () => {
+    let value = parseUnary();
+
+    while (["*", "/", "%"].includes(tokens[position])) {
+      const operator = tokens[position++];
+      const right = parseUnary();
+
+      if (operator === "*") value *= right;
+      else if (operator === "/") value /= right;
+      else value %= right;
+    }
+
+    return value;
+  };
+
+  const parseExpression = () => {
+    let value = parseTerm();
+
+    while (tokens[position] === "+" || tokens[position] === "-") {
+      const operator = tokens[position++];
+      const right = parseTerm();
+      value = operator === "+" ? value + right : value - right;
+    }
+
+    return value;
+  };
+
+  try {
+    const result = parseExpression();
+    if (position !== tokens.length || !Number.isFinite(result)) return null;
+    return Math.round(result * 1e10) / 1e10;
+  } catch (_e) {
+    return null;
+  }
+}
 
 function ensureActorVisibleInScrollView(scrollView, actor) {
   const adjustment = scrollView.get_vadjustment
@@ -50,11 +147,33 @@ function ensureActorVisibleInScrollView(scrollView, actor) {
 
 export default class SearchBar extends Extension {
   enable() {
-    this._settings = this.getSettings("org.gnome.shell.extensions.superbar");
+    this._enabled = true;
+    this._searchGeneration = 0;
+    this._pendingActivation = null;
+    this._resumableSession = null;
+    this._settings = this.getSettings();
     this._session = new Soup.Session();
     this._clipboard = St.Clipboard.get_default();
     this._clipboardHistory = [];
     this._loadClipboardHistory();
+
+    this._appSystem = Shell.AppSystem.get_default();
+    this._appSystem.connectObject(
+      "installed-changed",
+      () => this._refreshAppCache(),
+      this,
+    );
+    this._refreshAppCache();
+    this._windowTracker = Shell.WindowTracker.get_default();
+    this._folderCache = SYSTEM_FOLDERS.map((name) => ({
+      type: "file",
+      label: name,
+      subtitle: "Folder",
+      icon: "folder-symbolic",
+      uri: Gio.File.new_for_path(
+        GLib.build_filenamev([GLib.get_home_dir(), name]),
+      ).get_uri(),
+    }));
 
     this._container = new St.BoxLayout({
       style_class: "spotlight-container",
@@ -75,7 +194,7 @@ export default class SearchBar extends Extension {
     });
 
     this._entry = new St.Entry({
-      hint_text: "Search apps, calculate...",
+      hint_text: "Search apps, windows, files, or math…",
       style_class: "spotlight-entry",
       can_focus: true,
       x_expand: true,
@@ -114,10 +233,10 @@ export default class SearchBar extends Extension {
     this._resultsClip.height = 0;
     this._container.add_child(this._resultsClip);
 
-    this._keyPressId = this._entry.clutter_text.connect(
+    this._entry.clutter_text.connectObject(
       "key-press-event",
       (actor, event) => {
-        if (!this._container.visible) return Clutter.EVENT_PROPAGATE;
+        if (!this._searchOpen) return Clutter.EVENT_PROPAGATE;
 
         const key = event.get_key_symbol();
 
@@ -145,21 +264,26 @@ export default class SearchBar extends Extension {
             this._selectedIndex > -1 ? this._selectedIndex : 0;
           if (this._results.length > 0) {
             this._activateResult(targetIndex);
+          } else {
+            this._queueFirstResultActivation();
           }
           return Clutter.EVENT_STOP;
         }
 
         if (key === Clutter.KEY_Escape) {
           if (this._entry.get_text().length > 0) {
-            this._entry.set_text("");
+            this._resetSearch();
           } else {
-            this._closeSearch();
+            this._closeSearch({ preserveSession: false });
           }
           return Clutter.EVENT_STOP;
         }
 
         return Clutter.EVENT_PROPAGATE;
       },
+      "text-changed",
+      () => this._onTextChanged(),
+      this,
     );
 
     Main.layoutManager.addChrome(this._container);
@@ -171,38 +295,32 @@ export default class SearchBar extends Extension {
     this._container.scale_y = 0.95;
     this._container.hide();
 
+    this._searchOpen = false;
     this._selectedIndex = -1;
     this._results = [];
 
-    this._desktopSettings = new Gio.Settings({
-      schema_id: "org.gnome.desktop.interface",
-    });
-    this._themeChangeId = this._desktopSettings.connect(
-      "changed::color-scheme",
-      this._updateTheme.bind(this),
+    this._shellSettings = St.Settings.get();
+    this._shellSettings.connectObject(
+      "notify::color-scheme",
+      () => this._updateTheme(),
+      "notify::shell-color-scheme",
+      () => this._updateTheme(),
+      this,
     );
+    Main.sessionMode.connectObject("updated", () => this._updateTheme(), this);
     this._updateTheme();
 
-    this._textChangedId = this._entry.clutter_text.connect("text-changed", () =>
-      this._onTextChanged(),
+    this._settings.connectObject(
+      "changed::bar-width",
+      () => this._repositionContainer(),
+      "changed::bar-position",
+      () => this._repositionContainer(),
+      "changed::clipboard-monitor-enabled",
+      () => this._startClipboardMonitoring(),
+      "changed::clipboard-history-clear-request",
+      () => this._clearClipboardHistory(),
+      this,
     );
-
-    this._settingsChangedIds = [
-      this._settings.connect("changed::bar-width", () =>
-        this._repositionContainer(),
-      ),
-      this._settings.connect("changed::bar-position", () =>
-        this._repositionContainer(),
-      ),
-      this._settings.connect("changed::clipboard-monitor-enabled", () => {
-        if (this._settings.get_boolean("clipboard-monitor-enabled")) {
-          this._startClipboardMonitoring();
-        } else if (this._clipboardPollId) {
-          GLib.source_remove(this._clipboardPollId);
-          this._clipboardPollId = null;
-        }
-      }),
-    ];
 
     Main.wm.addKeybinding(
       "toggle-shortcut",
@@ -216,50 +334,30 @@ export default class SearchBar extends Extension {
   }
 
   disable() {
+    this._enabled = false;
     Main.wm.removeKeybinding("toggle-shortcut");
-    if (this._settingsChangedIds) {
-      this._settingsChangedIds.forEach((id) => this._settings.disconnect(id));
-      this._settingsChangedIds = null;
-    }
-    this._settings = null;
+    this._removeSource("_clipboardPollId");
+    this._cancelPendingSearch();
+    this._removeSource("_selectionScrollTimeoutId");
+    this._removeSource("_resultsHeightTimeoutId");
 
-    if (this._clipboardPollId) {
-      GLib.source_remove(this._clipboardPollId);
-      this._clipboardPollId = null;
-    }
-
-    if (this._themeChangeId) {
-      this._desktopSettings.disconnect(this._themeChangeId);
-      this._themeChangeId = null;
-    }
-    this._desktopSettings = null;
-
-    if (this._textChangedId) {
-      this._entry.clutter_text.disconnect(this._textChangedId);
-      this._textChangedId = null;
-    }
-
-    if (this._keyPressId) {
-      this._entry.clutter_text.disconnect(this._keyPressId);
-      this._keyPressId = null;
-    }
-
-    if (this._searchTimeout) {
-      GLib.source_remove(this._searchTimeout);
-      this._searchTimeout = null;
-    }
-
-    if (this._selectionScrollTimeoutId) {
-      GLib.source_remove(this._selectionScrollTimeoutId);
-      this._selectionScrollTimeoutId = null;
-    }
+    this._settings?.disconnectObject(this);
+    this._appSystem?.disconnectObject(this);
+    this._entry?.clutter_text.disconnectObject(this);
+    this._shellSettings?.disconnectObject(this);
+    Main.sessionMode.disconnectObject(this);
 
     if (this._clickShield) {
+      this._clickShield.disconnectObject(this);
+      Main.layoutManager.removeChrome(this._clickShield);
       this._clickShield.destroy();
       this._clickShield = null;
     }
 
+    if (this._resultsBox) this._clearResults();
+
     if (this._container) {
+      this._container.remove_all_transitions();
       Main.layoutManager.removeChrome(this._container);
       this._container.destroy();
       this._container = null;
@@ -276,12 +374,128 @@ export default class SearchBar extends Extension {
     this._resultsBox = null;
     this._resultsScroll = null;
     this._resultsClip = null;
+    this._settings = null;
+    this._appSystem = null;
+    this._appCache = null;
+    this._windowTracker = null;
+    this._folderCache = null;
+    this._shellSettings = null;
+    this._clipboard = null;
+    this._clipboardHistory = null;
+    this._results = null;
+    this._selectedIndex = -1;
+    this._pendingActivation = null;
+    this._resumableSession = null;
+    this._searchOpen = false;
+  }
+
+  _removeSource(propertyName) {
+    const sourceId = this[propertyName];
+    if (!sourceId) return;
+
+    GLib.Source.remove(sourceId);
+    this[propertyName] = null;
+  }
+
+  _isCurrentQuery(text, generation = null) {
+    return (
+      this._enabled &&
+      this._entry?.get_text().trim() === text &&
+      (generation === null || generation === this._searchGeneration)
+    );
+  }
+
+  _cancelPendingSearch() {
+    this._removeSource("_searchTimeout");
+
+    this._networkCancellable?.cancel();
+    this._networkCancellable = null;
+
+    this._fileSearchCancellable?.cancel();
+    this._fileSearchCancellable = null;
+
+    if (this._fileSearchProcess) {
+      try {
+        this._fileSearchProcess.force_exit();
+      } catch (_e) {
+        // The process may already have exited.
+      }
+      this._fileSearchProcess = null;
+    }
+  }
+
+  _queueFirstResultActivation() {
+    const text = this._entry?.get_text().trim();
+    if (!text) return;
+
+    this._pendingActivation = {
+      text,
+      generation: this._searchGeneration,
+    };
+  }
+
+  _consumePendingActivation() {
+    const pending = this._pendingActivation;
+    if (!pending) return false;
+
+    this._pendingActivation = null;
+    return this._isCurrentQuery(pending.text, pending.generation);
+  }
+
+  _hasPendingSearch() {
+    return Boolean(
+      this._searchTimeout ||
+        this._networkCancellable ||
+        this._fileSearchCancellable ||
+        this._fileSearchProcess,
+    );
+  }
+
+  _saveResumableSession() {
+    const text = this._entry?.get_text() ?? "";
+    if (!text.trim()) {
+      this._resumableSession = null;
+      return false;
+    }
+
+    // Expiry is checked lazily on the next open, avoiding another main-loop
+    // source that would need lifecycle cleanup.
+    this._resumableSession = {
+      text,
+      closedAt: Date.now(),
+      hadPendingSearch: this._hasPendingSearch(),
+    };
+    return true;
+  }
+
+  _takeResumableSession() {
+    const session = this._resumableSession;
+    this._resumableSession = null;
+
+    if (!session) return null;
+
+    const age = Date.now() - session.closedAt;
+    if (
+      age < 0 ||
+      age > RESUMABLE_SESSION_TTL_MS ||
+      this._entry?.get_text() !== session.text
+    ) {
+      return null;
+    }
+
+    return session;
+  }
+
+  _suspendSearch() {
+    this._searchGeneration += 1;
+    this._pendingActivation = null;
+    this._cancelPendingSearch();
   }
 
   // --- Open / Close ---
 
   _toggleSearch() {
-    if (this._container.visible) {
+    if (this._searchOpen) {
       this._closeSearch();
     } else {
       this._openSearch();
@@ -289,7 +503,30 @@ export default class SearchBar extends Extension {
   }
 
   _openSearch() {
+    if (this._searchOpen) return;
+
+    this._searchOpen = true;
+    const resumableSession = this._takeResumableSession();
+    const resumed = resumableSession !== null;
+
+    if (resumed) {
+      if (resumableSession.hadPendingSearch || this._results.length === 0) {
+        this._onTextChanged(true);
+      } else {
+        this._updateSearchIcon(this._entry.get_text().trim());
+        this._updateSelection();
+      }
+    } else {
+      this._resetSearch();
+    }
+
     this._pollClipboard();
+
+    if (this._clickShield) {
+      this._clickShield.disconnectObject(this);
+      Main.layoutManager.removeChrome(this._clickShield);
+      this._clickShield.destroy();
+    }
 
     this._clickShield = new St.Widget({
       reactive: true,
@@ -300,16 +537,19 @@ export default class SearchBar extends Extension {
     this._container
       .get_parent()
       .set_child_above_sibling(this._container, this._clickShield);
-    this._shieldClickId = this._clickShield.connect(
+    this._clickShield.connectObject(
       "button-press-event",
       () => {
         this._closeSearch();
         return Clutter.EVENT_STOP;
       },
+      this,
     );
 
+    this._container.remove_all_transitions();
     this._container.show();
     global.stage.set_key_focus(this._entry);
+    if (resumed) this._entry.clutter_text.set_selection(0, -1);
 
     this._container.ease({
       opacity: 255,
@@ -318,27 +558,28 @@ export default class SearchBar extends Extension {
       time: 180,
       transition: Clutter.AnimationMode.EASE_OUT_CUBIC,
     });
-
-    if (this._entry.get_text().length > 0) {
-      this._onTextChanged();
-    }
   }
 
-  _closeSearch() {
-    global.stage.set_key_focus(null);
+  _closeSearch({ preserveSession = true } = {}) {
+    if (!this._searchOpen) return;
 
-    if (this._shieldClickId && this._clickShield) {
-      this._clickShield.disconnect(this._shieldClickId);
-      this._shieldClickId = null;
+    const savedSession = preserveSession && this._saveResumableSession();
+    this._searchOpen = false;
+    global.stage.set_key_focus(null);
+    if (savedSession) {
+      this._suspendSearch();
+    } else {
+      this._resetSearch();
     }
+
     if (this._clickShield) {
+      this._clickShield.disconnectObject(this);
       Main.layoutManager.removeChrome(this._clickShield);
       this._clickShield.destroy();
       this._clickShield = null;
     }
 
-    this._animateResultsHeight(0);
-
+    this._container.remove_all_transitions();
     this._container.ease({
       opacity: 0,
       scale_x: 0.95,
@@ -346,21 +587,39 @@ export default class SearchBar extends Extension {
       time: 130,
       transition: Clutter.AnimationMode.EASE_IN_QUAD,
       onComplete: () => {
+        if (this._searchOpen || !this._container) return;
+
         this._container.hide();
-        this._clearResults();
       },
     });
   }
 
+  _resetSearch() {
+    this._searchGeneration += 1;
+    this._pendingActivation = null;
+    this._resumableSession = null;
+    this._cancelPendingSearch();
+    this._removeSource("_selectionScrollTimeoutId");
+    this._removeSource("_resultsHeightTimeoutId");
+
+    if (this._entry.get_text().length > 0) {
+      this._entry.set_text("");
+    } else {
+      this._clearResults();
+      this._animateResultsHeight(0);
+    }
+  }
+
   // --- Search ---
 
-  _onTextChanged() {
+  _onTextChanged(preserveSelection = false) {
     const text = this._entry.get_text().trim();
+    const generation = ++this._searchGeneration;
 
-    if (this._searchTimeout) {
-      GLib.source_remove(this._searchTimeout);
-      this._searchTimeout = null;
-    }
+    this._pendingActivation = null;
+    this._resumableSession = null;
+    this._cancelPendingSearch();
+    this._updateSearchIcon(text);
 
     if (text.length === 0) {
       this._clearResults();
@@ -368,107 +627,180 @@ export default class SearchBar extends Extension {
       return;
     }
 
-    this._searchTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
-      this._searchTimeout = null;
-      const currentText = this._entry.get_text().trim();
-      if (currentText.length === 0) return GLib.SOURCE_REMOVE;
+    if (this._isCurrencyExpression(text)) {
+      this._scheduleRemoteSearch(text, generation, (cancellable) =>
+        this._fetchCurrency(text, generation, cancellable),
+      );
+      return;
+    }
 
-      if (this._isCurrencyExpression(currentText)) {
-        this._fetchCurrency(currentText);
-        return GLib.SOURCE_REMOVE;
-      }
-      if (
-        /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+/i.test(
-          currentText,
-        )
-      ) {
-        this._fetchWeather(currentText);
-        return GLib.SOURCE_REMOVE;
-      }
-      if (/^def(?:ine)?\s+/i.test(currentText)) {
-        this._fetchDictionary(currentText);
-        return GLib.SOURCE_REMOVE;
-      }
+    if (this._isWeatherQuery(text)) {
+      this._scheduleRemoteSearch(text, generation, (cancellable) =>
+        this._fetchWeather(text, generation, cancellable),
+      );
+      return;
+    }
 
-      const clipboardQuery = this._parseClipboardQuery(currentText);
-      if (clipboardQuery !== null) {
-        this._showResults(this._searchClipboardHistory(clipboardQuery));
-        return GLib.SOURCE_REMOVE;
-      }
+    if (/^def(?:ine)?\s+/i.test(text)) {
+      this._scheduleRemoteSearch(text, generation, (cancellable) =>
+        this._fetchDictionary(text, generation, cancellable),
+      );
+      return;
+    }
 
-      const actionQuery = this._parseActionQuery(currentText);
-      if (actionQuery !== null) {
-        this._showResults(this._searchSystemCommands(actionQuery));
-        return GLib.SOURCE_REMOVE;
-      }
+    const clipboardQuery = this._parseClipboardQuery(text);
+    if (clipboardQuery !== null) {
+      this._showResults(
+        this._searchClipboardHistory(clipboardQuery),
+        preserveSelection,
+      );
+      return;
+    }
 
-      if (this._isMathExpression(currentText)) {
-        const calcResult = this._evaluate(currentText);
-        if (calcResult !== null) {
-          this._showResults([
+    const actionQuery = this._parseActionQuery(text);
+    if (actionQuery !== null) {
+      this._showResults(
+        this._searchSystemCommands(actionQuery),
+        preserveSelection,
+      );
+      return;
+    }
+
+    if (this._isMathExpression(text)) {
+      const calcResult = this._evaluate(text);
+      if (calcResult !== null) {
+        this._showResults(
+          [
             {
               type: "calc",
               label: `= ${calcResult}`,
+              subtitle: "Press Enter to copy",
               icon: "accessories-calculator-symbolic",
               value: String(calcResult),
             },
-          ]);
-          return GLib.SOURCE_REMOVE;
-        }
+          ],
+          preserveSelection,
+        );
+        return;
       }
+    }
 
-      const windowResults = this._searchWindows(currentText);
-      const appResults = this._searchApps(currentText);
-      const systemFolders = [
-        "Downloads",
-        "Documents",
-        "Pictures",
-        "Videos",
-        "Music",
-      ];
-      const folderMatches = systemFolders
-        .map((f) => ({
-          score: this._scoreSearchMatch(f, currentText),
-          type: "file",
-          label: f,
-          icon: "folder-symbolic",
-          uri: `file://${GLib.get_home_dir()}/${f}`,
-        }))
-        .filter((result) => result.score >= 0)
-        .sort((a, b) => b.score - a.score)
-        .map(({ score, ...result }) => result);
+    // Apps, windows, and common folders are cheap and render immediately.
+    this._showResults(
+      this._buildGenericResults(text),
+      preserveSelection,
+    );
 
-      this._searchFiles(currentText).then((fileResults) => {
-        if (this._entry.get_text().trim() !== currentText) return;
+    // Indexed file search is deferred so typing remains responsive.
+    if (text.length < 2) return;
 
-        const rankedFileResults = this._rankResultsByQuery(
-          fileResults,
-          currentText,
-        );
+    this._removeSource("_searchTimeout");
+    this._searchTimeout = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      FILE_SEARCH_DELAY_MS,
+      () => {
+        this._searchTimeout = null;
+        if (!this._isCurrentQuery(text, generation))
+          return GLib.SOURCE_REMOVE;
 
-        const combinedResults = [
-          ...windowResults,
-          ...folderMatches,
-          ...appResults,
-          ...rankedFileResults,
-          {
-            type: "web",
-            label: `Search the web for "${currentText}"`,
-            icon: "web-browser-symbolic",
-            query: currentText,
-          },
-        ];
+        const cancellable = new Gio.Cancellable();
+        this._fileSearchCancellable = cancellable;
+        this._searchFiles(text, cancellable).then((fileResults) => {
+          if (this._fileSearchCancellable === cancellable)
+            this._fileSearchCancellable = null;
+          if (!this._isCurrentQuery(text, generation)) return;
 
-        this._showResults(
-          this._dedupeResults(combinedResults).slice(
-            0,
-            this._settings.get_int("max-results"),
-          ),
-        );
-      });
+          this._showResults(
+            this._buildGenericResults(text, fileResults),
+            true,
+          );
+        });
 
-      return GLib.SOURCE_REMOVE;
-    });
+        return GLib.SOURCE_REMOVE;
+      },
+    );
+  }
+
+  _isWeatherQuery(text) {
+    return /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+/i.test(
+      text,
+    );
+  }
+
+  _scheduleRemoteSearch(text, generation, callback) {
+    this._clearResults();
+    this._animateResultsHeight(0);
+
+    this._removeSource("_searchTimeout");
+    this._searchTimeout = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      REMOTE_SEARCH_DELAY_MS,
+      () => {
+        this._searchTimeout = null;
+        if (!this._isCurrentQuery(text, generation))
+          return GLib.SOURCE_REMOVE;
+
+        const cancellable = new Gio.Cancellable();
+        this._networkCancellable = cancellable;
+        callback(cancellable).finally(() => {
+          if (this._networkCancellable === cancellable)
+            this._networkCancellable = null;
+        });
+
+        return GLib.SOURCE_REMOVE;
+      },
+    );
+  }
+
+  _updateSearchIcon(text) {
+    let iconName = "system-search-symbolic";
+
+    if (this._parseClipboardQuery(text) !== null) {
+      iconName = "edit-paste-symbolic";
+    } else if (this._parseActionQuery(text) !== null) {
+      iconName = "system-run-symbolic";
+    } else if (this._isCurrencyExpression(text)) {
+      iconName = "view-refresh-symbolic";
+    } else if (this._isWeatherQuery(text)) {
+      iconName = "weather-clear-symbolic";
+    } else if (/^def(?:ine)?\s+/i.test(text)) {
+      iconName = "accessories-dictionary-symbolic";
+    } else if (this._isMathExpression(text)) {
+      iconName = "accessories-calculator-symbolic";
+    }
+
+    this._icon.icon_name = iconName;
+  }
+
+  _buildGenericResults(text, fileResults = []) {
+    const folderMatches = this._folderCache
+      .map((folder) => ({
+        score: this._scoreSearchMatch(folder.label, text),
+        folder,
+      }))
+      .filter((result) => result.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .map(({ folder }) => folder);
+
+    const rankedFileResults = this._rankResultsByQuery(fileResults, text);
+    const combinedResults = [
+      ...this._searchApps(text),
+      ...this._searchWindows(text),
+      ...folderMatches,
+      ...rankedFileResults,
+      {
+        type: "web",
+        label: text,
+        subtitle: "Search the web",
+        icon: "web-browser-symbolic",
+        query: text,
+      },
+    ];
+
+    return this._dedupeResults(combinedResults).slice(
+      0,
+      this._settings.get_int("max-results"),
+    );
   }
 
   _parseClipboardQuery(text) {
@@ -492,7 +824,7 @@ export default class SearchBar extends Extension {
     file.load_contents_async(null, (_file, res) => {
       try {
         const [success, contents] = file.load_contents_finish(res);
-        if (!success) return;
+        if (!this._enabled || !success) return;
         const data = JSON.parse(new TextDecoder().decode(contents));
         if (!Array.isArray(data)) return;
         this._clipboardHistory = data
@@ -506,17 +838,31 @@ export default class SearchBar extends Extension {
 
   _saveClipboardHistory() {
     try {
+      const historyPath = this._getClipboardHistoryPath();
       GLib.file_set_contents(
-        this._getClipboardHistoryPath(),
+        historyPath,
         JSON.stringify(this._clipboardHistory),
       );
+      GLib.chmod(historyPath, 0o600);
     } catch (_e) {
       // save errors are non-fatal; silently ignore
     }
   }
 
+  _clearClipboardHistory() {
+    this._clipboardHistory = [];
+    this._saveClipboardHistory();
+
+    if (!this._searchOpen) return;
+
+    const query = this._parseClipboardQuery(this._entry.get_text().trim());
+    if (query !== null) this._showResults([]);
+  }
+
   _startClipboardMonitoring() {
+    this._removeSource("_clipboardPollId");
     if (!this._settings.get_boolean("clipboard-monitor-enabled")) return;
+
     this._pollClipboard();
     this._clipboardPollId = GLib.timeout_add(
       GLib.PRIORITY_DEFAULT,
@@ -530,6 +876,7 @@ export default class SearchBar extends Extension {
 
   _pollClipboard() {
     this._clipboard.get_text(St.ClipboardType.CLIPBOARD, (...args) => {
+      if (!this._enabled) return;
       const textArg = args.find((arg) => typeof arg === "string");
       this._storeClipboardEntry(textArg ?? "");
     });
@@ -554,10 +901,10 @@ export default class SearchBar extends Extension {
 
     this._saveClipboardHistory();
 
-    if (this._container.visible) {
+    if (this._searchOpen) {
       const query = this._parseClipboardQuery(this._entry.get_text().trim());
       if (query !== null) {
-        this._showResults(this._searchClipboardHistory(query));
+        this._showResults(this._searchClipboardHistory(query), true);
       }
     }
   }
@@ -621,6 +968,7 @@ export default class SearchBar extends Extension {
       this._clipboardHistory.map((entry) => ({
         type: "clipboard",
         label: entry.preview ?? entry.text.replace(/\s+/g, " ").slice(0, 80),
+        subtitle: "Clipboard history",
         icon: "edit-paste-symbolic",
         value: entry.text,
         timestamp: entry.timestamp,
@@ -645,23 +993,52 @@ export default class SearchBar extends Extension {
     return null;
   }
 
-  _searchApps(text) {
-    const query = text.toLowerCase();
-    // get_installed() returns Gio.AppInfo (DesktopAppInfo) objects, not Shell.App
-    return Shell.AppSystem.get_default()
+  _refreshAppCache() {
+    this._appCache = this._appSystem
       .get_installed()
-      .map((appInfo) => ({
-        score: this._scoreSearchMatch(appInfo.get_name() ?? "", query),
-        appInfo,
+      .filter(
+        (appInfo) =>
+          typeof appInfo.should_show !== "function" || appInfo.should_show(),
+      )
+      .map((appInfo) => {
+        const label =
+          appInfo.get_display_name?.() ?? appInfo.get_name() ?? "Application";
+        const description = appInfo.get_description?.()?.trim() ?? "";
+        const appId = appInfo.get_id();
+
+        return {
+          type: "app",
+          label,
+          subtitle: description || "Application",
+          gicon: appInfo.get_icon(),
+          appId,
+          searchText: [
+            label,
+            appInfo.get_name?.(),
+            description,
+            appId,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        };
+      });
+  }
+
+  _searchApps(text) {
+    return (this._appCache ?? [])
+      .map((app) => ({
+        score: this._scoreSearchMatch(app.searchText, text),
+        app,
       }))
       .filter((entry) => entry.score >= 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, this._settings.get_int("max-results"))
-      .map(({ appInfo }) => ({
-        type: "app",
-        label: appInfo.get_name(),
-        gicon: appInfo.get_icon(),
-        appId: appInfo.get_id(),
+      .slice(0, Math.min(this._settings.get_int("max-results"), 5))
+      .map(({ app }) => ({
+        type: app.type,
+        label: app.label,
+        subtitle: app.subtitle,
+        gicon: app.gicon,
+        appId: app.appId,
       }));
   }
 
@@ -683,7 +1060,7 @@ export default class SearchBar extends Extension {
     return windows
       .map((w) => {
         const title = w.get_title() ?? "";
-        const app = Shell.WindowTracker.get_default().get_window_app(w);
+        const app = this._windowTracker.get_window_app(w);
         const appName = app?.get_name() ?? "";
         return {
           score: Math.max(
@@ -692,13 +1069,16 @@ export default class SearchBar extends Extension {
           ),
           window: w,
           title,
+          appName,
         };
       })
       .filter((entry) => entry.score >= 0)
       .sort((a, b) => b.score - a.score)
-      .map(({ window, title }) => ({
+      .slice(0, 4)
+      .map(({ window, title, appName }) => ({
         type: "window",
-        label: `Switch to: ${title}`,
+        label: title || appName || "Untitled window",
+        subtitle: appName ? `${appName} · Open window` : "Open window",
         icon: "go-jump-symbolic",
         window,
       }));
@@ -706,96 +1086,106 @@ export default class SearchBar extends Extension {
 
   _searchSystemCommands(text) {
     const query = text.toLowerCase();
+    const systemActions = SystemActions.getDefault();
     const commands = [
       {
         label: "Shut Down",
-        cmd: "gnome-session-quit --power-off",
+        systemAction: "power-off",
+        available: systemActions.canPowerOff,
         icon: "system-shutdown-symbolic",
         keywords: ["poweroff", "power off", "shutdown", "off"],
       },
       {
         label: "Restart",
-        cmd: "gnome-session-quit --reboot",
+        systemAction: "restart",
+        available: systemActions.canRestart,
         icon: "view-refresh-symbolic",
         keywords: ["reboot", "reload", "restart"],
       },
       {
         label: "Log Out",
-        cmd: "gnome-session-quit --logout",
+        systemAction: "logout",
+        available: systemActions.canLogout,
         icon: "system-log-out-symbolic",
         keywords: ["logout", "sign out", "log out"],
       },
       {
         label: "Lock Screen",
-        cmd: "loginctl lock-session",
+        systemAction: "lock-screen",
+        available: systemActions.canLockScreen,
         icon: "system-lock-screen-symbolic",
         keywords: ["lock", "screen lock"],
       },
       {
         label: "Sleep",
-        cmd: "systemctl suspend",
+        systemAction: "suspend",
+        available: systemActions.canSuspend,
         icon: "weather-clear-night-symbolic",
         keywords: ["suspend", "sleep"],
       },
       {
         label: "Open Settings",
-        cmd: "gnome-control-center",
+        argv: ["gnome-control-center"],
         icon: "org.gnome.Settings-symbolic",
         keywords: ["settings", "preferences", "control center"],
       },
       {
         label: "Wi-Fi Settings",
-        cmd: "gnome-control-center wifi",
+        argv: ["gnome-control-center", "wifi"],
         icon: "network-wireless-signal-excellent-symbolic",
         keywords: ["wifi", "wi-fi", "wireless", "network"],
       },
       {
         label: "Bluetooth Settings",
-        cmd: "gnome-control-center bluetooth",
+        argv: ["gnome-control-center", "bluetooth"],
         icon: "bluetooth-active-symbolic",
         keywords: ["bluetooth", "bt"],
       },
       {
         label: "Display Settings",
-        cmd: "gnome-control-center display",
+        argv: ["gnome-control-center", "display"],
         icon: "video-display-symbolic",
         keywords: ["display", "monitor", "screen settings"],
       },
       {
         label: "Sound Settings",
-        cmd: "gnome-control-center sound",
+        argv: ["gnome-control-center", "sound"],
         icon: "audio-volume-high-symbolic",
         keywords: ["sound", "audio", "volume settings"],
       },
       {
         label: "Open Downloads",
-        cmd: `gio open "${GLib.get_home_dir()}/Downloads"`,
+        uri: Gio.File.new_for_path(
+          GLib.build_filenamev([GLib.get_home_dir(), "Downloads"]),
+        ).get_uri(),
         icon: "folder-download-symbolic",
         keywords: ["downloads", "download folder"],
       },
       {
         label: "Open Documents",
-        cmd: `gio open "${GLib.get_home_dir()}/Documents"`,
+        uri: Gio.File.new_for_path(
+          GLib.build_filenamev([GLib.get_home_dir(), "Documents"]),
+        ).get_uri(),
         icon: "folder-documents-symbolic",
         keywords: ["documents", "docs", "document folder"],
       },
       {
         label: "Open Pictures",
-        cmd: `gio open "${GLib.get_home_dir()}/Pictures"`,
+        uri: Gio.File.new_for_path(
+          GLib.build_filenamev([GLib.get_home_dir(), "Pictures"]),
+        ).get_uri(),
         icon: "folder-pictures-symbolic",
         keywords: ["pictures", "photos", "images"],
       },
       {
         label: "Take Screenshot",
-        cmds: [
-          "gnome-screenshot -i",
-          "gdbus call --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop --method org.freedesktop.portal.Screenshot.Screenshot '' \"{'interactive': <true>}\"",
-        ],
+        systemAction: "screenshot",
         icon: "applets-screenshooter-symbolic",
         keywords: ["screenshot", "screen capture", "capture"],
       },
     ];
     return commands
+      .filter((command) => command.available ?? true)
       .map((c) => ({
         score: this._scoreSearchMatch(
           [c.label, ...(c.keywords ?? [])].join(" "),
@@ -808,47 +1198,81 @@ export default class SearchBar extends Extension {
       .map(({ command: c }) => ({
         type: "system",
         label: c.label,
+        subtitle: "System action",
         icon: c.icon,
-        cmd: c.cmd,
-        cmds: c.cmds,
+        systemAction: c.systemAction,
+        argv: c.argv,
+        uri: c.uri,
       }));
   }
 
   _runSystemAction(result) {
     try {
-      if (Array.isArray(result.cmds) && result.cmds.length > 0) {
-        for (const command of result.cmds) {
-          const executable = command.trim().split(/\s+/)[0];
-          if (!GLib.find_program_in_path(executable)) continue;
+      if (result.systemAction) {
+        const systemActions = SystemActions.getDefault();
 
-          GLib.spawn_command_line_async(command);
-          return;
+        switch (result.systemAction) {
+          case "power-off":
+            systemActions.activatePowerOff();
+            break;
+          case "restart":
+            systemActions.activateRestart();
+            break;
+          case "logout":
+            systemActions.activateLogout();
+            break;
+          case "lock-screen":
+            systemActions.activateLockScreen();
+            break;
+          case "suspend":
+            systemActions.activateSuspend();
+            break;
+          case "screenshot":
+            Screenshot.showScreenshotUI();
+            break;
         }
-
-        return; // no available executable for this action
+        return;
       }
 
-      if (result.cmd) {
-        GLib.spawn_command_line_async(result.cmd);
+      if (result.uri) {
+        Gio.AppInfo.launch_default_for_uri(result.uri, null);
+        return;
+      }
+
+      if (result.argv) {
+        const executable = GLib.find_program_in_path(result.argv[0]);
+        if (!executable) return;
+
+        Gio.Subprocess.new(
+          [executable, ...result.argv.slice(1)],
+          Gio.SubprocessFlags.NONE,
+        );
       }
     } catch (e) {
       console.error(`[Superbar] Action failed (${result.label}): ${e.message}`);
     }
   }
 
-  async _searchFiles(text) {
+  async _searchFiles(text, cancellable = null) {
     return new Promise((resolve) => {
       try {
-        const binary = GLib.find_program_in_path("localsearch")
-          ? "localsearch"
-          : "tracker3";
+        const binary =
+          GLib.find_program_in_path("localsearch") ??
+          GLib.find_program_in_path("tracker3");
+        if (!binary) {
+          resolve([]);
+          return;
+        }
+
         const proc = new Gio.Subprocess({
+          // Each value is a distinct argument; user input is never shell code.
           argv: [binary, "search", "--limit=6", text],
           flags:
             Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
         });
+        this._fileSearchProcess = proc;
         proc.init(null);
-        proc.communicate_utf8_async(null, null, (proc, res) => {
+        proc.communicate_utf8_async(null, cancellable, (proc, res) => {
           try {
             const [, stdout] = proc.communicate_utf8_finish(res);
             if (!stdout) return resolve([]);
@@ -860,29 +1284,50 @@ export default class SearchBar extends Extension {
               .split("\n")
               .filter((l) => l.includes("file://"));
 
-            const fileResults = lines.map((line) => {
-              const uri = line.trim().split(/\s+/)[0];
-              const file = Gio.File.new_for_uri(uri);
-              const pathParts = uri.split("/").filter((p) => p.length > 0);
-              const filename = decodeURIComponent(pathParts.pop() || "");
-              const fileInfo = file.query_info(
-                "standard::symbolic-icon",
-                Gio.FileQueryInfoFlags.NONE,
-                null,
-              );
-              return {
-                type: "file",
-                label: filename,
-                gicon: fileInfo.get_symbolic_icon(),
-                uri,
-              };
+            const fileResults = lines.flatMap((line) => {
+              try {
+                const uri = line.trim().split(/\s+/)[0];
+                const file = Gio.File.new_for_uri(uri);
+                const fileInfo = file.query_info(
+                  "standard::symbolic-icon,standard::type",
+                  Gio.FileQueryInfoFlags.NONE,
+                  null,
+                );
+                const parentPath = file.get_parent()?.get_path() ?? "";
+                const homePath = GLib.get_home_dir();
+                const displayParent = parentPath.startsWith(homePath)
+                  ? `~${parentPath.slice(homePath.length)}`
+                  : parentPath;
+                const kind =
+                  fileInfo.get_file_type() === Gio.FileType.DIRECTORY
+                    ? "Folder"
+                    : "File";
+
+                return [
+                  {
+                    type: "file",
+                    label: file.get_basename() ?? uri,
+                    subtitle: displayParent
+                      ? `${kind} · ${displayParent}`
+                      : kind,
+                    gicon: fileInfo.get_symbolic_icon(),
+                    uri,
+                  },
+                ];
+              } catch (_e) {
+                return [];
+              }
             });
             resolve(fileResults);
-          } catch (e) {
+          } catch (_e) {
             resolve([]);
+          } finally {
+            if (this._fileSearchProcess === proc)
+              this._fileSearchProcess = null;
           }
         });
-      } catch (e) {
+      } catch (_e) {
+        this._fileSearchProcess = null;
         resolve([]);
       }
     });
@@ -890,7 +1335,7 @@ export default class SearchBar extends Extension {
 
   // --- Web Fetches ---
 
-  async _fetchWeather(text) {
+  async _fetchWeather(text, generation = null, cancellable = null) {
     const match = text
       .trim()
       .match(
@@ -905,10 +1350,10 @@ export default class SearchBar extends Extension {
       const geoBytes = await this._session.send_and_read_async(
         Soup.Message.new("GET", geoUrl),
         GLib.PRIORITY_DEFAULT,
-        null,
+        cancellable,
       );
 
-      if (this._entry.get_text().trim() !== text) return;
+      if (!this._isCurrentQuery(text, generation)) return;
 
       const geoData = JSON.parse(new TextDecoder().decode(geoBytes.get_data()));
       if (!geoData.results?.length) return;
@@ -928,10 +1373,10 @@ export default class SearchBar extends Extension {
       const weatherBytes = await this._session.send_and_read_async(
         Soup.Message.new("GET", weatherUrl),
         GLib.PRIORITY_DEFAULT,
-        null,
+        cancellable,
       );
 
-      if (this._entry.get_text().trim() !== text) return;
+      if (!this._isCurrentQuery(text, generation)) return;
 
       const w = JSON.parse(new TextDecoder().decode(weatherBytes.get_data()));
       const c = w.current;
@@ -953,7 +1398,9 @@ export default class SearchBar extends Extension {
           uri: `https://wttr.in/${encodeURIComponent(name)}`,
         },
       ]);
-    } catch (e) {}
+    } catch (_e) {
+      // weather lookup failed; silently ignore
+    }
   }
 
   _weatherIcon(code) {
@@ -1001,7 +1448,7 @@ export default class SearchBar extends Extension {
     return map[code] ?? "Unknown";
   }
 
-  async _fetchDictionary(text) {
+  async _fetchDictionary(text, generation = null, cancellable = null) {
     const match = text.trim().match(/^def(?:ine)?\s+(.+)$/i);
     if (!match) return;
     const word = match[1];
@@ -1011,10 +1458,10 @@ export default class SearchBar extends Extension {
       const bytes = await this._session.send_and_read_async(
         Soup.Message.new("GET", url),
         GLib.PRIORITY_DEFAULT,
-        null,
+        cancellable,
       );
 
-      if (this._entry.get_text().trim() !== text) return;
+      if (!this._isCurrentQuery(text, generation)) return;
 
       const data = JSON.parse(new TextDecoder().decode(bytes.get_data()));
       if (data?.length > 0) {
@@ -1023,6 +1470,7 @@ export default class SearchBar extends Extension {
           {
             type: "web",
             label: `${word}: ${meaning}`,
+            subtitle: "Dictionary definition",
             icon: "accessories-dictionary-symbolic",
             query: word,
           },
@@ -1037,7 +1485,7 @@ export default class SearchBar extends Extension {
     return /^\d+(\.\d+)?\s*[a-zA-Z]+\s+to\s+[a-zA-Z]+$/i.test(text.trim());
   }
 
-  async _fetchCurrency(text) {
+  async _fetchCurrency(text, generation = null, cancellable = null) {
     const commonNames = {
       yen: "JPY",
       euro: "EUR",
@@ -1061,10 +1509,10 @@ export default class SearchBar extends Extension {
       const bytes = await this._session.send_and_read_async(
         Soup.Message.new("GET", url),
         GLib.PRIORITY_DEFAULT,
-        null,
+        cancellable,
       );
 
-      if (this._entry.get_text().trim() !== text) return;
+      if (!this._isCurrentQuery(text, generation)) return;
 
       const data = JSON.parse(new TextDecoder().decode(bytes.get_data()));
       if (data.rates?.[to] !== undefined) {
@@ -1072,6 +1520,7 @@ export default class SearchBar extends Extension {
           {
             type: "calc",
             label: `${data.rates[to]} ${to}`,
+            subtitle: "Press Enter to copy",
             icon: "view-refresh-symbolic",
             value: String(data.rates[to]),
           },
@@ -1091,24 +1540,58 @@ export default class SearchBar extends Extension {
   }
 
   _evaluate(expr) {
-    try {
-      const result = Function(`"use strict"; return (${expr})`)();
-      if (typeof result === "number" && isFinite(result)) {
-        return Math.round(result * 1e10) / 1e10;
-      }
-    } catch (_) {}
-    return null;
+    return evaluateMathExpression(expr);
   }
 
   // --- Results ---
 
-  _showResults(results) {
+  _resultsMatch(first, second) {
+    if (!first || !second || first.type !== second.type) return false;
+
+    switch (first.type) {
+      case "app":
+        return first.appId === second.appId;
+      case "window":
+        return first.window === second.window;
+      case "file":
+      case "weather":
+        return first.uri === second.uri;
+      case "web":
+        return first.query === second.query && first.label === second.label;
+      case "clipboard":
+      case "calc":
+        return first.value === second.value;
+      case "system":
+        return (
+          first.systemAction === second.systemAction &&
+          first.label === second.label
+        );
+      default:
+        return first.label === second.label;
+    }
+  }
+
+  _showResults(results, preserveSelection = false) {
+    const selectedResult =
+      preserveSelection && this._selectedIndex >= 0
+        ? this._results[this._selectedIndex]
+        : null;
+
     this._clearResults();
     this._results = results;
-    this._selectedIndex = -1;
+    this._selectedIndex = selectedResult
+      ? results.findIndex((result) =>
+          this._resultsMatch(result, selectedResult),
+        )
+      : -1;
 
     if (results.length === 0) {
       this._animateResultsHeight(0);
+      return;
+    }
+
+    if (this._consumePendingActivation()) {
+      this._activateResult(0);
       return;
     }
 
@@ -1172,49 +1655,87 @@ export default class SearchBar extends Extension {
               gicon: result.gicon,
               icon_size: 24,
               style_class: "spotlight-result-icon",
+              y_align: Clutter.ActorAlign.CENTER,
             })
           : new St.Icon({
               icon_name: result.icon || "system-search-symbolic",
               icon_size: 24,
               style_class: "spotlight-result-icon",
+              y_align: Clutter.ActorAlign.CENTER,
             });
         rowBox.add_child(icon);
-        rowBox.add_child(
-          new St.Label({
-            text: result.label,
-            style_class: "spotlight-result-label",
-            y_align: Clutter.ActorAlign.CENTER,
+
+        const textBox = new St.BoxLayout({
+          vertical: true,
+          x_expand: true,
+          y_align: Clutter.ActorAlign.CENTER,
+          style_class: "spotlight-result-text",
+        });
+        const titleLabel = new St.Label({
+          text: result.label,
+          style_class: "spotlight-result-label",
+          x_expand: true,
+        });
+        titleLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+        titleLabel.clutter_text.set_single_line_mode(true);
+        textBox.add_child(titleLabel);
+
+        if (result.subtitle) {
+          const subtitleLabel = new St.Label({
+            text: result.subtitle,
+            style_class: "spotlight-result-subtitle",
             x_expand: true,
-          }),
-        );
+          });
+          subtitleLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+          subtitleLabel.clutter_text.set_single_line_mode(true);
+          textBox.add_child(subtitleLabel);
+        }
+
+        rowBox.add_child(textBox);
         row.set_child(rowBox);
       }
 
-      row.connect("clicked", () => this._activateResult(index));
+      row.connectObject("clicked", () => this._activateResult(index), this);
       this._resultsBox.add_child(row);
     });
 
     this._updateSelection();
 
     this._resultsBox.queue_relayout();
-    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 0, () => {
-      const [, naturalHeight] = this._resultsBox.get_preferred_height(
-        this._resultsBox.width,
-      );
-      this._animateResultsHeight(Math.min(naturalHeight, 450));
-      return GLib.SOURCE_REMOVE;
-    });
+    this._removeSource("_resultsHeightTimeoutId");
+    this._resultsHeightTimeoutId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      0,
+      () => {
+        this._resultsHeightTimeoutId = null;
+        if (!this._resultsBox) return GLib.SOURCE_REMOVE;
+
+        const [, naturalHeight] = this._resultsBox.get_preferred_height(
+          this._resultsBox.width,
+        );
+        this._animateResultsHeight(Math.min(naturalHeight, 450));
+        return GLib.SOURCE_REMOVE;
+      },
+    );
   }
 
   _clearResults() {
+    this._removeSource("_resultsHeightTimeoutId");
     this._results = [];
     this._selectedIndex = -1;
-    this._resultsBox.get_children().forEach((c) => c.destroy());
+    this._resultsBox.get_children().forEach((child) => {
+      child.disconnectObject(this);
+      child.destroy();
+    });
   }
 
   _activateResult(index) {
     const result = this._results[index];
     if (!result) return;
+
+    // Clear the search before focus leaves Superbar. Some actions switch
+    // windows or sessions immediately, so cleanup must happen first.
+    this._closeSearch({ preserveSession: false });
 
     if (result.type === "app") {
       try {
@@ -1228,7 +1749,7 @@ export default class SearchBar extends Extension {
           if (appInfo) appInfo.launch([], null);
         }
       } catch (e) {
-        console.error(`[Search Bar] Failed to launch app: ${e}`);
+        console.error(`[Superbar] Failed to launch app: ${e}`);
       }
     } else if (result.type === "calc") {
       St.Clipboard.get_default().set_text(
@@ -1252,8 +1773,6 @@ export default class SearchBar extends Extension {
     } else if (result.type === "file") {
       Gio.AppInfo.launch_default_for_uri(result.uri, null);
     }
-
-    this._closeSearch();
   }
 
   _setSelected(index) {
@@ -1274,14 +1793,15 @@ export default class SearchBar extends Extension {
       }
     });
 
-    this._queueScrollToSelection();
+    if (this._selectedIndex >= 0) {
+      this._queueScrollToSelection();
+    } else {
+      this._removeSource("_selectionScrollTimeoutId");
+    }
   }
 
   _queueScrollToSelection() {
-    if (this._selectionScrollTimeoutId) {
-      GLib.source_remove(this._selectionScrollTimeoutId);
-      this._selectionScrollTimeoutId = null;
-    }
+    this._removeSource("_selectionScrollTimeoutId");
 
     this._resultsBox.queue_relayout();
     this._selectionScrollTimeoutId = GLib.timeout_add(
@@ -1307,9 +1827,10 @@ export default class SearchBar extends Extension {
   _animateResultsHeight(targetHeight) {
     this._resultsScroll.height = targetHeight;
     this._resultsScroll.set_height(targetHeight);
+    this._resultsClip.remove_all_transitions();
     this._resultsClip.ease({
       height: targetHeight,
-      time: 200,
+      time: 120,
       transition: Clutter.AnimationMode.EASE_OUT_CUBIC,
     });
   }
@@ -1320,7 +1841,7 @@ export default class SearchBar extends Extension {
     const containerWidth = this._settings.get_int("bar-width");
     const positionKey = this._settings.get_string("bar-position");
     const fractionMap = { top: 0.25, center: 0.4, bottom: 0.65 };
-    const fraction = fractionMap[positionKey] ?? 0.25;
+    const fraction = fractionMap[positionKey] ?? fractionMap.center;
     this._container.set_size(containerWidth, -1);
     this._container.set_position(
       Math.floor((global.stage.width - containerWidth) / 2),
@@ -1331,8 +1852,7 @@ export default class SearchBar extends Extension {
   // --- Theme ---
 
   _updateTheme() {
-    const colorScheme = this._desktopSettings.get_string("color-scheme");
-    if (colorScheme === "prefer-dark") {
+    if (Main.getStyleVariant() === "dark") {
       this._container.add_style_class_name("dark-mode");
     } else {
       this._container.remove_style_class_name("dark-mode");

@@ -154,7 +154,7 @@ const KeybindingRow = GObject.registerClass(
 export default class SuperbarPreferences extends ExtensionPreferences {
   fillPreferencesWindow(window) {
     window.set_default_size(600, 500);
-    const settings = this.getSettings("org.gnome.shell.extensions.superbar");
+    const settings = this.getSettings();
 
     // ── Keyboard shortcut page ─────────────────────────────────────────────
     const shortcutPage = new Adw.PreferencesPage({
@@ -229,7 +229,16 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       ]);
       try {
         GLib.file_set_contents(historyPath, "[]");
-      } catch (_e) {}
+        GLib.chmod(historyPath, 0o600);
+      } catch (_e) {
+        // Clearing history is best-effort.
+      }
+
+      const request = settings.get_uint("clipboard-history-clear-request");
+      settings.set_uint(
+        "clipboard-history-clear-request",
+        (request + 1) >>> 0,
+      );
     });
     clearRow.add_suffix(clearBtn);
     behaviorGroup.add(clearRow);
@@ -287,7 +296,10 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       model: Gtk.StringList.new(positionLabels),
     });
     const currentPos = settings.get_string("bar-position");
-    positionRow.set_selected(Math.max(0, positionKeys.indexOf(currentPos)));
+    const currentPositionIndex = positionKeys.indexOf(currentPos);
+    positionRow.set_selected(
+      currentPositionIndex >= 0 ? currentPositionIndex : 1,
+    );
     positionRow.connect("notify::selected", () => {
       settings.set_string(
         "bar-position",
@@ -309,7 +321,7 @@ export default class SuperbarPreferences extends ExtensionPreferences {
 
     const descRow = new Adw.ActionRow({
       title: "Version",
-      subtitle: `${this.metadata.version}`,
+      subtitle: `${this.metadata.version ?? "Development"}`,
     });
     infoGroup.add(descRow);
 

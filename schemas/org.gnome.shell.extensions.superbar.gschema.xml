@@ -17,6 +17,11 @@
       <summary>Clipboard History Limit</summary>
       <description>Maximum number of clipboard entries to remember.</description>
     </key>
+    <key name="clipboard-history-clear-request" type="u">
+      <default>0</default>
+      <summary>Clipboard History Clear Request</summary>
+      <description>Internal counter used to clear clipboard history in the running extension.</description>
+    </key>
     <key name="max-results" type="i">
       <default>8</default>
       <range min="3" max="20"/>
@@ -30,7 +35,7 @@
       <description>Width of the Superbar in pixels.</description>
     </key>
     <key name="bar-position" type="s">
-      <default>'top'</default>
+      <default>'center'</default>
       <summary>Vertical Position</summary>
       <description>Vertical position of the Superbar: top, center, or bottom.</description>
     </key>

@@ -34,6 +34,7 @@ Open it from anywhere with **Alt+Space**.
 | **Dictionary**            | `define <word>` — English definitions via Free Dictionary API          |
 | **Web Search**            | Any unmatched query falls through to a web search                      |
 | **System Commands**       | `shutdown`, `reboot`, `logout`, `lock`, `suspend`, `screenshot`        |
+| **Resumable Searches**    | Reopen a dismissed search within five minutes; typing replaces it      |
 | **Configurable Shortcut** | Change the toggle keybinding in GNOME Extensions preferences           |
 
 ---
@@ -66,8 +67,37 @@ Log out and back in if this is the first time installing.
 - GNOME Shell 49+
 - An internet connection for weather, dictionary, and currency features
 
+## Local development and testing
+
+Create and install a fresh extension bundle from the repository:
+
+```bash
+mkdir -p build
+gnome-extensions pack --force --out-dir=build .
+gnome-extensions install --force \
+  build/superbar@Furkan-rgb.github.io.shell-extension.zip
+```
+
+GNOME Shell caches extension modules, so start a fresh Shell process after code
+changes. On GNOME 49+ Wayland, the safest workflow is a nested session:
+
+```bash
+dbus-run-session gnome-shell --devkit --wayland
+```
+
+Open a terminal inside that nested session, then enable and test Superbar:
+
+```bash
+gnome-extensions enable superbar@Furkan-rgb.github.io
+gnome-extensions prefs superbar@Furkan-rgb.github.io
+journalctl -f -o cat /usr/bin/gnome-shell
+```
+
+On X11, press **Alt+F2**, enter `r`, then enable the extension. On a regular
+Wayland session, log out and back in instead of restarting GNOME Shell in place.
+
 ---
 
 ## License
 
-GPL-2.0 — see [LICENSE](LICENSE)
+GPL-2.0-or-later — see [LICENSE](LICENSE)

@@ -1,9 +1,11 @@
 {
   "name": "Superbar",
-  "description": "Superbar is a keyboard-driven, system-wide launcher and command bar for GNOME Shell",
+  "description": "Superbar is a keyboard-driven, system-wide launcher and command bar for GNOME Shell. It reads the clipboard to provide clipboard history and sends user-entered weather locations, dictionary terms, and currency conversions to open-meteo.com, dictionaryapi.dev, and frankfurter.app.",
   "uuid": "superbar@Furkan-rgb.github.io",
-  "version": 1,
   "url": "https://github.com/Furkan-rgb/superbar",
   "settings-schema": "org.gnome.shell.extensions.superbar",
+  "donations": {
+    "buymeacoffee": "furkan12"
+  },
   "shell-version": ["49", "50"]
 }
