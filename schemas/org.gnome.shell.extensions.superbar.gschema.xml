@@ -28,6 +28,16 @@
       <summary>Maximum Search Results</summary>
       <description>How many results to show in the search bar at once.</description>
     </key>
+    <key name="adaptive-ranking-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Adaptive Ranking</summary>
+      <description>Prioritize previously selected applications and system actions.</description>
+    </key>
+    <key name="ranking-history" type="s">
+      <default>'[]'</default>
+      <summary>Adaptive Ranking History</summary>
+      <description>Internal history of selected application identifiers and named system actions.</description>
+    </key>
     <key name="bar-width" type="i">
       <default>640</default>
       <range min="400" max="1200"/>

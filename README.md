@@ -35,6 +35,8 @@ Open it from anywhere with **Alt+Space**.
 | **Web Search**            | Any unmatched query falls through to a web search                      |
 | **System Commands**       | `shutdown`, `reboot`, `logout`, `lock`, `suspend`, `screenshot`        |
 | **Resumable Searches**    | Reopen a dismissed search within five minutes; typing replaces it      |
+| **Adaptive Ranking**      | Prioritizes strong matches, active context, and selected apps/actions  |
+| **Multi-Monitor Aware**   | Opens on the focused monitor and stays inside its usable work area     |
 | **Configurable Shortcut** | Change the toggle keybinding in GNOME Extensions preferences           |
 
 ---
@@ -69,28 +71,29 @@ Log out and back in if this is the first time installing.
 
 ## Local development and testing
 
-Create and install a fresh extension bundle from the repository:
+The Makefile provides the common development and release commands:
 
 ```bash
-mkdir -p build
-gnome-extensions pack --force --out-dir=build .
-gnome-extensions install --force \
-  build/superbar@Furkan-rgb.github.io.shell-extension.zip
+make help
+make test       # validate, build, and verify the ZIP
+make install    # install the latest local build
+make nested     # install and start a fresh nested GNOME Shell
+make export     # export the upload-ready ZIP to ~/Desktop
 ```
 
-GNOME Shell caches extension modules, so start a fresh Shell process after code
-changes. On GNOME 49+ Wayland, the safest workflow is a nested session:
+The generated archive is always named
+`superbar@Furkan-rgb.github.io.shell-extension.zip`. `make export` writes it to
+the Desktop; override that destination when needed with
+`make DESKTOP_DIR=/path/to/output export`.
+
+GNOME Shell caches extension modules, so use the nested session after code
+changes. Once it opens, enable Superbar and inspect its state from a terminal
+inside the nested desktop while in the repository directory:
 
 ```bash
-dbus-run-session gnome-shell --devkit --wayland
-```
-
-Open a terminal inside that nested session, then enable and test Superbar:
-
-```bash
-gnome-extensions enable superbar@Furkan-rgb.github.io
-gnome-extensions prefs superbar@Furkan-rgb.github.io
-journalctl -f -o cat /usr/bin/gnome-shell
+make enable
+make prefs
+make status
 ```
 
 On X11, press **Alt+F2**, enter `r`, then enable the extension. On a regular

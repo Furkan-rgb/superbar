@@ -175,6 +175,40 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     });
     shortcutGroup.add(row);
 
+    // ── Search group ────────────────────────────────────────────────────────
+    const searchGroup = new Adw.PreferencesGroup({
+      title: "Search",
+      description: "Control how Superbar orders matching results",
+    });
+    shortcutPage.add(searchGroup);
+
+    const adaptiveRankingRow = new Adw.SwitchRow({
+      title: "Adaptive Ranking",
+      subtitle:
+        "Prioritize frequently selected apps and actions; queries and file paths are never stored",
+    });
+    settings.bind(
+      "adaptive-ranking-enabled",
+      adaptiveRankingRow,
+      "active",
+      Gio.SettingsBindFlags.DEFAULT,
+    );
+    searchGroup.add(adaptiveRankingRow);
+
+    const resetRankingRow = new Adw.ActionRow({
+      title: "Reset Learned Ranking",
+      subtitle: "Forget previously selected apps and system actions",
+    });
+    const resetRankingBtn = new Gtk.Button({
+      label: "Reset",
+      valign: Gtk.Align.CENTER,
+    });
+    resetRankingBtn.connect("clicked", () =>
+      settings.reset("ranking-history"),
+    );
+    resetRankingRow.add_suffix(resetRankingBtn);
+    searchGroup.add(resetRankingRow);
+
     // ── Behavior group ─────────────────────────────────────────────────────
     const behaviorGroup = new Adw.PreferencesGroup({
       title: "Clipboard",

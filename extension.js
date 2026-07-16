@@ -15,6 +15,15 @@ import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
 const RESUMABLE_SESSION_TTL_MS = 5 * 60 * 1000;
+const MONITOR_EDGE_MARGIN = 24;
+const RANKING_HISTORY_LIMIT = 50;
+const RANKING_HISTORY_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+const SOURCE_RANK_BONUS = {
+  app: 100,
+  window: 80,
+  folder: 35,
+  file: 10,
+};
 const SYSTEM_FOLDERS = [
   "Downloads",
   "Documents",
@@ -22,6 +31,89 @@ const SYSTEM_FOLDERS = [
   "Videos",
   "Music",
 ];
+
+function normalizeSearchText(value) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function scoreSingleSearchTerm(haystack, needle) {
+  if (!needle) return 0;
+  if (!haystack) return -1;
+
+  if (haystack === needle) return 1000;
+  if (haystack.startsWith(needle)) {
+    return 880 - Math.min(80, haystack.length - needle.length);
+  }
+
+  const words = haystack.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const wordIndex = words.findIndex((word) => word.startsWith(needle));
+  if (wordIndex !== -1) {
+    const lengthPenalty = Math.min(80, haystack.length - needle.length);
+    return 760 - wordIndex * 8 - lengthPenalty;
+  }
+
+  const includeIndex = haystack.indexOf(needle);
+  if (includeIndex !== -1) {
+    return 620 - Math.min(140, includeIndex * 4);
+  }
+
+  let queryIndex = 0;
+  let firstMatch = -1;
+  let lastMatch = -1;
+  let contiguousMatches = 0;
+
+  for (let index = 0; index < haystack.length; index += 1) {
+    if (haystack[index] !== needle[queryIndex]) continue;
+
+    if (firstMatch === -1) firstMatch = index;
+    if (lastMatch === index - 1) contiguousMatches += 1;
+    lastMatch = index;
+    queryIndex += 1;
+
+    if (queryIndex === needle.length) {
+      const span = lastMatch - firstMatch + 1;
+      const gapPenalty = Math.max(0, span - needle.length) * 10;
+      const startPenalty = firstMatch * 3;
+      return Math.max(
+        120,
+        420 + contiguousMatches * 5 - gapPenalty - startPenalty,
+      );
+    }
+  }
+
+  return -1;
+}
+
+function scoreSearchMatch(text, query) {
+  const haystack = normalizeSearchText(text);
+  const needle = normalizeSearchText(query);
+  if (!needle) return 0;
+  if (!haystack) return -1;
+
+  const phraseScore = scoreSingleSearchTerm(haystack, needle);
+  const terms = needle.split(/\s+/).filter(Boolean);
+  if (terms.length < 2) return phraseScore;
+
+  const termScores = terms.map((term) =>
+    scoreSingleSearchTerm(haystack, term),
+  );
+  if (termScores.some((score) => score < 0)) return phraseScore;
+
+  const averageScore =
+    termScores.reduce((total, score) => total + score, 0) /
+    termScores.length;
+  const orderedBonus = haystack.includes(needle) ? 60 : 0;
+  const tokenScore = Math.min(
+    970,
+    Math.round(averageScore - (terms.length - 1) * 12 + orderedBonus),
+  );
+
+  return Math.max(phraseScore, tokenScore);
+}
 
 function evaluateMathExpression(expression) {
   const compactExpression = expression.replace(/\s+/g, "");
@@ -151,13 +243,17 @@ export default class SearchBar extends Extension {
     this._searchGeneration = 0;
     this._pendingActivation = null;
     this._resumableSession = null;
+    this._activeMonitorIndex = null;
     this._settings = this.getSettings();
+    this._rankingHistory = new Map();
+    this._loadRankingHistory();
     this._session = new Soup.Session();
     this._clipboard = St.Clipboard.get_default();
     this._clipboardHistory = [];
     this._loadClipboardHistory();
 
     this._appSystem = Shell.AppSystem.get_default();
+    this._appUsage = Shell.AppUsage.get_default();
     this._appSystem.connectObject(
       "installed-changed",
       () => this._refreshAppCache(),
@@ -308,6 +404,16 @@ export default class SearchBar extends Extension {
       this,
     );
     Main.sessionMode.connectObject("updated", () => this._updateTheme(), this);
+    Main.layoutManager.connectObject(
+      "monitors-changed",
+      () => this._onMonitorConfigurationChanged(),
+      this._container,
+    );
+    global.display.connectObject(
+      "workareas-changed",
+      () => this._repositionContainer(),
+      this._container,
+    );
     this._updateTheme();
 
     this._settings.connectObject(
@@ -319,6 +425,15 @@ export default class SearchBar extends Extension {
       () => this._startClipboardMonitoring(),
       "changed::clipboard-history-clear-request",
       () => this._clearClipboardHistory(),
+      "changed::max-results",
+      () => this._refreshCurrentSearch(),
+      "changed::adaptive-ranking-enabled",
+      () => this._refreshCurrentSearch(),
+      "changed::ranking-history",
+      () => {
+        this._loadRankingHistory();
+        this._refreshCurrentSearch();
+      },
       this,
     );
 
@@ -346,6 +461,10 @@ export default class SearchBar extends Extension {
     this._entry?.clutter_text.disconnectObject(this);
     this._shellSettings?.disconnectObject(this);
     Main.sessionMode.disconnectObject(this);
+    if (this._container) {
+      Main.layoutManager.disconnectObject(this._container);
+      global.display.disconnectObject(this._container);
+    }
 
     if (this._clickShield) {
       this._clickShield.disconnectObject(this);
@@ -376,16 +495,20 @@ export default class SearchBar extends Extension {
     this._resultsClip = null;
     this._settings = null;
     this._appSystem = null;
+    this._appUsage = null;
     this._appCache = null;
     this._windowTracker = null;
     this._folderCache = null;
     this._shellSettings = null;
     this._clipboard = null;
     this._clipboardHistory = null;
+    this._rankingHistory?.clear();
+    this._rankingHistory = null;
     this._results = null;
     this._selectedIndex = -1;
     this._pendingActivation = null;
     this._resumableSession = null;
+    this._activeMonitorIndex = null;
     this._searchOpen = false;
   }
 
@@ -395,6 +518,116 @@ export default class SearchBar extends Extension {
 
     GLib.Source.remove(sourceId);
     this[propertyName] = null;
+  }
+
+  _refreshCurrentSearch() {
+    if (!this._searchOpen || !this._entry?.get_text().trim()) return;
+    this._onTextChanged(true);
+  }
+
+  _loadRankingHistory() {
+    this._rankingHistory?.clear();
+    if (!this._settings || !this._rankingHistory) return;
+
+    try {
+      const entries = JSON.parse(
+        this._settings.get_string("ranking-history"),
+      );
+      if (!Array.isArray(entries)) return;
+
+      const now = Date.now();
+      entries.slice(0, RANKING_HISTORY_LIMIT).forEach((entry) => {
+        if (
+          typeof entry?.key !== "string" ||
+          !Number.isFinite(entry.count) ||
+          !Number.isFinite(entry.lastUsed)
+        ) {
+          return;
+        }
+
+        const age = now - entry.lastUsed;
+        if (age < 0 || age > RANKING_HISTORY_MAX_AGE_MS) return;
+
+        this._rankingHistory.set(entry.key, {
+          count: Math.max(1, Math.min(1000, Math.floor(entry.count))),
+          lastUsed: entry.lastUsed,
+        });
+      });
+    } catch (_e) {
+      // Invalid ranking data is ignored and replaced on the next activation.
+    }
+  }
+
+  _saveRankingHistory() {
+    if (!this._settings || !this._rankingHistory) return;
+
+    const entries = [...this._rankingHistory.entries()]
+      .sort((a, b) => b[1].lastUsed - a[1].lastUsed)
+      .slice(0, RANKING_HISTORY_LIMIT)
+      .map(([key, value]) => ({
+        key,
+        count: value.count,
+        lastUsed: value.lastUsed,
+      }));
+
+    this._rankingHistory.clear();
+    entries.forEach(({ key, count, lastUsed }) => {
+      this._rankingHistory.set(key, { count, lastUsed });
+    });
+
+    const serialized = JSON.stringify(entries);
+    if (serialized !== this._settings.get_string("ranking-history")) {
+      this._settings.set_string("ranking-history", serialized);
+    }
+  }
+
+  _getResultRankingKey(result) {
+    if (result.appId) return `app:${result.appId}`;
+    if (result.type !== "system") return null;
+
+    const actionId =
+      result.systemAction ??
+      result.argv?.join("\u001f") ??
+      result.label;
+    return actionId ? `action:${actionId}` : null;
+  }
+
+  _getAdaptiveRankingBoost(result) {
+    if (
+      !this._settings?.get_boolean("adaptive-ranking-enabled") ||
+      !this._rankingHistory
+    ) {
+      return 0;
+    }
+
+    const key = this._getResultRankingKey(result);
+    const entry = key ? this._rankingHistory.get(key) : null;
+    if (!entry) return 0;
+
+    const age = Math.max(0, Date.now() - entry.lastUsed);
+    const recencyBoost =
+      50 * Math.max(0, 1 - age / RANKING_HISTORY_MAX_AGE_MS);
+    const frequencyBoost = Math.min(40, Math.log2(entry.count + 1) * 12);
+    return Math.round(recencyBoost + frequencyBoost);
+  }
+
+  _recordResultUsage(result) {
+    if (
+      !this._settings?.get_boolean("adaptive-ranking-enabled") ||
+      !this._rankingHistory
+    ) {
+      return;
+    }
+
+    const key = this._getResultRankingKey(result);
+    if (!key) return;
+
+    const previous = this._rankingHistory.get(key);
+    this._rankingHistory.set(key, {
+      count: Math.min(1000, (previous?.count ?? 0) + 1),
+      lastUsed: Date.now(),
+    });
+    this._saveRankingHistory();
   }
 
   _isCurrentQuery(text, generation = null) {
@@ -505,6 +738,7 @@ export default class SearchBar extends Extension {
   _openSearch() {
     if (this._searchOpen) return;
 
+    this._activeMonitorIndex = this._getTargetMonitorIndex();
     this._searchOpen = true;
     const resumableSession = this._takeResumableSession();
     const resumed = resumableSession !== null;
@@ -520,6 +754,7 @@ export default class SearchBar extends Extension {
       this._resetSearch();
     }
 
+    this._repositionContainer();
     this._pollClipboard();
 
     if (this._clickShield) {
@@ -530,9 +765,8 @@ export default class SearchBar extends Extension {
 
     this._clickShield = new St.Widget({
       reactive: true,
-      width: global.stage.width,
-      height: global.stage.height,
     });
+    this._resizeClickShield();
     Main.layoutManager.addChrome(this._clickShield);
     this._container
       .get_parent()
@@ -774,20 +1008,46 @@ export default class SearchBar extends Extension {
 
   _buildGenericResults(text, fileResults = []) {
     const folderMatches = this._folderCache
-      .map((folder) => ({
-        score: this._scoreSearchMatch(folder.label, text),
-        folder,
-      }))
-      .filter((result) => result.score >= 0)
-      .sort((a, b) => b.score - a.score)
-      .map(({ folder }) => folder);
+      .map((folder) => {
+        const matchScore = this._scoreSearchMatch(folder.label, text);
+        return {
+          ...folder,
+          _source: "folder",
+          _matchScore: matchScore,
+        };
+      })
+      .filter((folder) => folder._matchScore >= 0);
 
-    const rankedFileResults = this._rankResultsByQuery(fileResults, text);
+    const matchedFileResults = fileResults
+      .map((result) => {
+        const labelScore = this._scoreSearchMatch(result.label, text);
+        const subtitleScore = this._scoreSearchMatch(
+          result.subtitle ?? "",
+          text,
+        );
+        return {
+          ...result,
+          _source: "file",
+          _matchScore: Math.max(
+            labelScore,
+            subtitleScore < 0 ? -1 : subtitleScore - 120,
+          ),
+        };
+      })
+      .filter((result) => result._matchScore >= 0);
+
+    const localResults = this._dedupeResults(
+      this._rankGenericResults(
+        [
+          ...this._searchApps(text),
+          ...this._searchWindows(text),
+          ...folderMatches,
+          ...matchedFileResults,
+        ],
+      ),
+    );
     const combinedResults = [
-      ...this._searchApps(text),
-      ...this._searchWindows(text),
-      ...folderMatches,
-      ...rankedFileResults,
+      ...localResults,
       {
         type: "web",
         label: text,
@@ -797,7 +1057,7 @@ export default class SearchBar extends Extension {
       },
     ];
 
-    return this._dedupeResults(combinedResults).slice(
+    return combinedResults.slice(
       0,
       this._settings.get_int("max-results"),
     );
@@ -910,42 +1170,7 @@ export default class SearchBar extends Extension {
   }
 
   _scoreSearchMatch(text, query) {
-    const haystack = text.toLowerCase().trim();
-    const needle = query.toLowerCase().trim();
-    if (!needle) return 0;
-    if (!haystack) return -1;
-
-    if (haystack === needle) return 1000;
-    if (haystack.startsWith(needle))
-      return 850 - (haystack.length - needle.length);
-
-    const words = haystack.split(/[^a-z0-9]+/).filter(Boolean);
-    if (words.some((word) => word.startsWith(needle))) {
-      return 700 - (haystack.length - needle.length);
-    }
-
-    const includeIndex = haystack.indexOf(needle);
-    if (includeIndex !== -1) return 500 - includeIndex;
-
-    let queryIndex = 0;
-    let firstMatch = -1;
-    let lastMatch = -1;
-    let contiguousBonus = 0;
-
-    for (let index = 0; index < haystack.length; index += 1) {
-      if (haystack[index] !== needle[queryIndex]) continue;
-
-      if (firstMatch === -1) firstMatch = index;
-      if (lastMatch === index - 1) contiguousBonus += 8;
-      lastMatch = index;
-      queryIndex += 1;
-
-      if (queryIndex === needle.length) {
-        return 300 - firstMatch + contiguousBonus;
-      }
-    }
-
-    return -1;
+    return scoreSearchMatch(text, query);
   }
 
   _rankResultsByQuery(
@@ -954,13 +1179,55 @@ export default class SearchBar extends Extension {
     textSelector = (result) => result.label ?? "",
   ) {
     return results
-      .map((result) => ({
+      .map((result, index) => ({
         score: this._scoreSearchMatch(textSelector(result), query),
         result,
+        index,
       }))
       .filter((entry) => entry.score >= 0)
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.score - a.score || a.index - b.index)
       .map((entry) => entry.result);
+  }
+
+  _rankGenericResults(results) {
+    return results
+      .map((result, index) => ({
+        result,
+        index,
+        score:
+          result._matchScore +
+          (SOURCE_RANK_BONUS[result._source] ?? 0) +
+          (result._contextBoost ?? 0) +
+          this._getAdaptiveRankingBoost(result),
+      }))
+      .sort((a, b) => {
+        const scoreDifference = b.score - a.score;
+        if (scoreDifference !== 0) return scoreDifference;
+
+        if (
+          a.result.type === "app" &&
+          b.result.type === "app" &&
+          a.result.appId &&
+          b.result.appId
+        ) {
+          const usageOrder = this._appUsage.compare(
+            a.result.appId,
+            b.result.appId,
+          );
+          if (usageOrder !== 0) return usageOrder;
+        }
+
+        const matchDifference =
+          b.result._matchScore - a.result._matchScore;
+        return matchDifference || a.index - b.index;
+      })
+      .map(({ result }) => {
+        const publicResult = { ...result };
+        delete publicResult._source;
+        delete publicResult._matchScore;
+        delete publicResult._contextBoost;
+        return publicResult;
+      });
   }
 
   _searchClipboardHistory(query) {
@@ -1003,7 +1270,9 @@ export default class SearchBar extends Extension {
       .map((appInfo) => {
         const label =
           appInfo.get_display_name?.() ?? appInfo.get_name() ?? "Application";
+        const genericName = appInfo.get_generic_name?.()?.trim() ?? "";
         const description = appInfo.get_description?.()?.trim() ?? "";
+        const keywords = appInfo.get_keywords?.() ?? [];
         const appId = appInfo.get_id();
 
         return {
@@ -1015,31 +1284,76 @@ export default class SearchBar extends Extension {
           searchText: [
             label,
             appInfo.get_name?.(),
+            genericName,
             description,
+            ...keywords,
             appId,
           ]
             .filter(Boolean)
             .join(" "),
         };
+      })
+      .filter((app) => Boolean(app.appId));
+  }
+
+  _getShellAppSearchScores(text) {
+    const scores = new Map();
+
+    try {
+      const matchGroups = Shell.AppSystem.search(text) ?? [];
+      matchGroups.forEach((group, groupIndex) => {
+        group.forEach((appId) => {
+          scores.set(appId, 940 - groupIndex * 90);
+        });
       });
+    } catch (_e) {
+      // Fall back to Superbar's own matcher if Shell search is unavailable.
+    }
+
+    return scores;
   }
 
   _searchApps(text) {
+    const activeWorkspace = global.workspace_manager.get_active_workspace();
+    const targetMonitor =
+      this._activeMonitorIndex ?? this._getTargetMonitorIndex();
+    const shellSearchScores = this._getShellAppSearchScores(text);
+
     return (this._appCache ?? [])
-      .map((app) => ({
-        score: this._scoreSearchMatch(app.searchText, text),
-        app,
-      }))
-      .filter((entry) => entry.score >= 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, Math.min(this._settings.get_int("max-results"), 5))
-      .map(({ app }) => ({
-        type: app.type,
-        label: app.label,
-        subtitle: app.subtitle,
-        gicon: app.gicon,
-        appId: app.appId,
-      }));
+      .map((app) => {
+        const labelScore = this._scoreSearchMatch(app.label, text);
+        const metadataScore = this._scoreSearchMatch(app.searchText, text);
+        const matchScore = Math.max(
+          labelScore,
+          metadataScore < 0 ? -1 : metadataScore - 80,
+          shellSearchScores.get(app.appId) ?? -1,
+        );
+        const shellApp = this._appSystem.lookup_app(app.appId);
+        const appWindows = shellApp?.get_windows() ?? [];
+        let contextBoost = 0;
+
+        if (appWindows.length > 0) contextBoost += 45;
+        if (shellApp?.is_on_workspace(activeWorkspace)) contextBoost += 20;
+        if (
+          appWindows.some(
+            (window) => window.get_monitor() === targetMonitor,
+          )
+        ) {
+          contextBoost += 15;
+        }
+
+        return {
+          type: app.type,
+          label: app.label,
+          subtitle: app.subtitle,
+          gicon: app.gicon,
+          appId: app.appId,
+          _source: "app",
+          _matchScore: matchScore,
+          _contextBoost: contextBoost,
+        };
+      })
+      .filter((app) => app._matchScore >= 0);
   }
 
   _dedupeResults(results) {
@@ -1055,33 +1369,39 @@ export default class SearchBar extends Extension {
   }
 
   _searchWindows(text) {
-    const query = text.toLowerCase();
     const windows = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null);
+    const activeWorkspace = global.workspace_manager.get_active_workspace();
+    const targetMonitor =
+      this._activeMonitorIndex ?? this._getTargetMonitorIndex();
+
     return windows
-      .map((w) => {
+      .map((w, mruIndex) => {
         const title = w.get_title() ?? "";
         const app = this._windowTracker.get_window_app(w);
         const appName = app?.get_name() ?? "";
+        const titleScore = this._scoreSearchMatch(title, text);
+        const appScore = this._scoreSearchMatch(appName, text);
+        let contextBoost = Math.max(0, 24 - mruIndex * 3);
+
+        if (w.get_workspace() === activeWorkspace) contextBoost += 45;
+        if (w.get_monitor() === targetMonitor) contextBoost += 20;
+
         return {
-          score: Math.max(
-            this._scoreSearchMatch(title, query),
-            this._scoreSearchMatch(appName, query),
-          ),
+          type: "window",
+          label: title || appName || "Untitled window",
+          subtitle: appName ? `${appName} · Open window` : "Open window",
+          icon: "go-jump-symbolic",
           window: w,
-          title,
-          appName,
+          appId: app?.get_id() ?? null,
+          _source: "window",
+          _matchScore: Math.max(
+            titleScore,
+            appScore < 0 ? -1 : appScore - 35,
+          ),
+          _contextBoost: contextBoost,
         };
       })
-      .filter((entry) => entry.score >= 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 4)
-      .map(({ window, title, appName }) => ({
-        type: "window",
-        label: title || appName || "Untitled window",
-        subtitle: appName ? `${appName} · Open window` : "Open window",
-        icon: "go-jump-symbolic",
-        window,
-      }));
+      .filter((window) => window._matchScore >= 0);
   }
 
   _searchSystemCommands(text) {
@@ -1186,24 +1506,38 @@ export default class SearchBar extends Extension {
     ];
     return commands
       .filter((command) => command.available ?? true)
-      .map((c) => ({
-        score: this._scoreSearchMatch(
-          [c.label, ...(c.keywords ?? [])].join(" "),
+      .map((c, index) => {
+        const labelScore = this._scoreSearchMatch(c.label, query);
+        const keywordScore = this._scoreSearchMatch(
+          (c.keywords ?? []).join(" "),
           query,
-        ),
-        command: c,
+        );
+        const result = {
+          type: "system",
+          label: c.label,
+          subtitle: "System action",
+          icon: c.icon,
+          systemAction: c.systemAction,
+          argv: c.argv,
+          uri: c.uri,
+        };
+        return {
+          matchScore: Math.max(
+            labelScore,
+            keywordScore < 0 ? -1 : keywordScore - 60,
+          ),
+          result,
+          index,
+        };
+      })
+      .filter((entry) => entry.matchScore >= 0)
+      .map((entry) => ({
+        ...entry,
+        score:
+          entry.matchScore + this._getAdaptiveRankingBoost(entry.result),
       }))
-      .filter((entry) => entry.score >= 0)
-      .sort((a, b) => b.score - a.score)
-      .map(({ command: c }) => ({
-        type: "system",
-        label: c.label,
-        subtitle: "System action",
-        icon: c.icon,
-        systemAction: c.systemAction,
-        argv: c.argv,
-        uri: c.uri,
-      }));
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(({ result }) => result);
   }
 
   _runSystemAction(result) {
@@ -1736,6 +2070,7 @@ export default class SearchBar extends Extension {
     // Clear the search before focus leaves Superbar. Some actions switch
     // windows or sessions immediately, so cleanup must happen first.
     this._closeSearch({ preserveSession: false });
+    this._recordResultUsage(result);
 
     if (result.type === "app") {
       try {
@@ -1832,21 +2167,97 @@ export default class SearchBar extends Extension {
       height: targetHeight,
       time: 120,
       transition: Clutter.AnimationMode.EASE_OUT_CUBIC,
+      onComplete: () => this._repositionContainer(),
     });
   }
 
   // --- Layout ---
 
+  _getTargetMonitorIndex() {
+    const monitors = Main.layoutManager.monitors ?? [];
+    if (monitors.length === 0) return 0;
+
+    const candidateIndices = [
+      Main.layoutManager.focusIndex,
+      global.display.focus_window?.get_monitor(),
+      global.display.get_current_monitor(),
+      Main.layoutManager.primaryIndex,
+    ];
+
+    return (
+      candidateIndices.find(
+        (index) =>
+          Number.isInteger(index) && index >= 0 && index < monitors.length,
+      ) ?? 0
+    );
+  }
+
+  _onMonitorConfigurationChanged() {
+    this._activeMonitorIndex = this._searchOpen
+      ? this._getTargetMonitorIndex()
+      : null;
+    this._resizeClickShield();
+    this._repositionContainer();
+  }
+
+  _resizeClickShield() {
+    if (!this._clickShield) return;
+
+    this._clickShield.set_position(0, 0);
+    this._clickShield.set_size(global.stage.width, global.stage.height);
+  }
+
   _repositionContainer() {
-    const containerWidth = this._settings.get_int("bar-width");
+    if (!this._container || !this._settings) return;
+
+    const monitors = Main.layoutManager.monitors ?? [];
+    if (monitors.length === 0) return;
+
+    let monitorIndex = this._activeMonitorIndex;
+    if (
+      !Number.isInteger(monitorIndex) ||
+      monitorIndex < 0 ||
+      monitorIndex >= monitors.length
+    ) {
+      monitorIndex = this._getTargetMonitorIndex();
+    }
+    this._activeMonitorIndex = monitorIndex;
+
+    const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+    if (!workArea) return;
+
+    const configuredWidth = this._settings.get_int("bar-width");
+    const availableWidth = Math.max(
+      1,
+      workArea.width - MONITOR_EDGE_MARGIN * 2,
+    );
+    const containerWidth = Math.min(configuredWidth, availableWidth);
     const positionKey = this._settings.get_string("bar-position");
     const fractionMap = { top: 0.25, center: 0.4, bottom: 0.65 };
     const fraction = fractionMap[positionKey] ?? fractionMap.center;
+
     this._container.set_size(containerWidth, -1);
-    this._container.set_position(
-      Math.floor((global.stage.width - containerWidth) / 2),
-      Math.floor(global.stage.height * fraction),
+    const [, naturalHeight] =
+      this._container.get_preferred_height(containerWidth);
+    const containerHeight = Math.max(
+      1,
+      this._container.height,
+      naturalHeight,
     );
+    const minimumY = workArea.y + MONITOR_EDGE_MARGIN;
+    const maximumY = Math.max(
+      minimumY,
+      workArea.y +
+        workArea.height -
+        containerHeight -
+        MONITOR_EDGE_MARGIN,
+    );
+    const preferredY = workArea.y + Math.floor(workArea.height * fraction);
+    const y = Math.max(minimumY, Math.min(maximumY, preferredY));
+    const x =
+      workArea.x + Math.floor((workArea.width - containerWidth) / 2);
+
+    this._container.set_position(x, y);
   }
 
   // --- Theme ---
