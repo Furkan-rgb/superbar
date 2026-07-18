@@ -1,18 +1,17 @@
 # Superbar
 
-A keyboard-driven, system-wide launcher and command bar for GNOME Shell — inspired by macOS Spotlight.
-
-Open it from anywhere with **Alt+Space**.
+A launcher and command bar for GNOME Shell, inspired by macOS Spotlight. Press
+**Alt+Space** and start typing.
 
 ![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-49%20%7C%2050-blue)
 ![License](https://img.shields.io/badge/license-GPL--2.0--or--later-green)
 
 ---
 
-## UI Renders
+## Screenshots
 
-Deterministic high-resolution renders are generated from the local showcase
-HTML/CSS so the README stays aligned with the extension UI.
+The images below are made with the showcase included in this repository. They
+are not screenshots of a running GNOME Shell session.
 
 |                                                                    |                                                                           |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
@@ -27,31 +26,31 @@ HTML/CSS so the README stays aligned with the extension UI.
 
 | Feature                   | How to use                                                             |
 | ------------------------- | ---------------------------------------------------------------------- |
-| **App Launcher**          | Type the app name — fuzzy match, launches or focuses                   |
-| **Window Switcher**       | Type part of a window title — jumps across workspaces                  |
-| **File Search**           | Type a filename — searches home dir and common folders                 |
-| **Clipboard History**     | `clip`, `clipboard`, or `history` prefix — browse saved entries        |
-| **Weather**               | `weather <city>` — live temp, humidity, wind (Open-Meteo, no API key)  |
-| **Calculator**            | Type a math expression e.g. `2 * (3 + 4)` — result copied to clipboard |
+| **App Launcher**          | Type an app name to launch it or focus it if it is already open        |
+| **Window Switcher**       | Search window titles, including windows on other workspaces            |
+| **File Search**           | Find files in your home directory and common folders                   |
+| **Clipboard History**     | Start with `clip`, `clipboard`, or `history`                            |
+| **Weather**               | Try `weather Amsterdam`                                                 |
+| **Calculator**            | Type an expression such as `2 * (3 + 4)`                               |
 | **Currency Converter**    | `100 USD to EUR`                                                       |
-| **Dictionary**            | `define <word>` — English definitions via Free Dictionary API          |
-| **Web Search**            | Any unmatched query falls through to a web search                      |
-| **System Commands**       | Use `>`, `cmd`, `command`, or `action` before an action name           |
-| **Resumable Searches**    | Reopen a dismissed search within five minutes; typing replaces it      |
-| **Adaptive Ranking**      | Prioritizes strong matches, active context, and selected apps/actions  |
-| **Multi-Monitor Aware**   | Opens on the focused monitor and stays inside its usable work area     |
-| **Configurable Shortcut** | Change the toggle keybinding in GNOME Extensions preferences           |
-| **Adjustable Appearance** | Choose light and dark color presets, opacity, width, and screen position |
+| **Dictionary**            | `define word`                                                          |
+| **Web Search**            | Unmatched searches can be opened in your browser                       |
+| **System Actions**        | Start with `>`, `cmd`, `command`, or `action`                          |
+| **Resumable Searches**    | Close and reopen the bar without immediately losing your search        |
+| **Adaptive Ranking**      | Apps and actions you choose can move higher in later searches          |
+| **Multi-monitor Support** | Opens on the monitor you are currently using                           |
+| **Appearance Settings**   | Pick the theme, colors, opacity, width, and screen position             |
 
 ---
 
 ## Installation
 
-### From GNOME Extensions (recommended)
+### GNOME Extensions
 
-> **Note:** The extension is currently under review by the GNOME Extensions team and is not yet available on [extensions.gnome.org](https://extensions.gnome.org). In the meantime, please use the manual installation method below.
+Superbar has been submitted to extensions.gnome.org and is currently waiting
+for review. Until it is approved, it can be installed manually.
 
-[Superbar on Gnome Extensions Marketplace](https://extensions.gnome.org/extension/9778/superbar/) - Soon!
+[Superbar on extensions.gnome.org](https://extensions.gnome.org/extension/9778/superbar/)
 
 ### Manual
 
@@ -75,14 +74,14 @@ Log out and back in if this is the first time installing.
 
 ## Local development and testing
 
-The Makefile provides the common development and release commands:
+The commands I use most often are:
 
 ```bash
 make help
 make test       # validate, build, and verify the ZIP
 make install    # install the latest local build
 make nested     # install and start a fresh nested GNOME Shell
-make renders    # generate deterministic UI showcase images
+make renders    # rebuild the README images
 make export     # export the upload-ready ZIP to build/; does not install
 ```
 
@@ -90,15 +89,12 @@ The generated archive is always named
 `superbar@Furkan-rgb.github.io.shell-extension.zip`. `make export` writes it to
 the repository's `build/` directory but does not update the installed extension.
 
-### UI showcase renders
+### Rebuilding the screenshots
 
-Run `make renders` to generate consistent high-resolution 1716×1298 PNG
-illustrations in `renders/`. The 2× pixel density is the default while the
-composition remains equivalent to an 858×649 canvas. The showcase mirrors
-Superbar's current dimensions, neutral light and dark surfaces, result rows,
-bottom-positioned expansion, mode indicator, footer, and background opacity. It
-uses local HTML, CSS, vector icons, and headless Chrome/Chromium, so it does not
-need npm packages or network access.
+`make renders` opens the local showcase in headless Chrome or Chromium and
+writes the finished PNGs to `renders/`. The default images are 1716×1298, which
+is twice the size of the 858×649 layout used by the showcase. No npm packages
+or network connection are needed.
 
 ```bash
 make renders          # every state
@@ -110,18 +106,15 @@ node scripts/render-showcase.mjs --scale 4 --state dark-weather
 node scripts/render-showcase.mjs --list
 ```
 
-The rendered states include empty search, general results, bottom-positioned
-results, clipboard copy and copied states, calculator output, and weather. Set
-`SUPERBAR_CHROME` to the Chrome or Chromium executable if it is installed
-outside the common system locations. The renderer is an illustration of the
-GNOME Shell UI rather than a live Shell capture; when the extension's design
-tokens change, update `showcase/styles.css` alongside `stylesheet.css`.
+The available states cover an empty bar, normal results, bottom positioning,
+clipboard history, the calculator, and weather. If Chrome or Chromium is in an
+unusual location, set `SUPERBAR_CHROME` to its executable. The showcase has its
+own stylesheet, so UI changes may also need to be copied to
+`showcase/styles.css`.
 
-For development, close any existing nested Shell and run `make nested`. This
-packages and installs the current source before starting a fresh Shell process;
-disabling and re-enabling an extension does not reliably reload cached modules.
-Once it opens, enable Superbar and inspect its state from a terminal inside the
-nested desktop while in the repository directory:
+For UI testing, close any older nested Shell and run `make nested`. This builds
+and installs the current source before starting a fresh Shell. Once it opens,
+run these commands from a terminal inside the nested desktop:
 
 ```bash
 make enable
@@ -134,47 +127,33 @@ Wayland session, log out and back in instead of restarting GNOME Shell in place.
 
 ---
 
-## Design and implementation notes
+## A few UI details
 
-Superbar uses a restrained, high-contrast material adapted to GNOME Shell. Its
-soft neutral off-white light surface and charcoal dark surface keep text, icons,
-and results readable without GNOME Shell's rectangular background blur.
-The current neutral surfaces remain the defaults, with additional light and
-dark background presets available independently in Appearance settings.
-Background opacity is adjustable from 65–100% and
-defaults to 90%.
+The default light color is a neutral off-white and the dark color is charcoal.
+There are a handful of alternatives for both, and the background opacity can be
+set from 65% to 100%. It defaults to 90%.
 
-When Vertical Position is set to Bottom, the search row remains anchored at its
-configured screen position, the footer stays on the underside of the bar, and
-the result panel reveals upward. Bottom placement mirrors Top: the bottom edge
-sits the same distance from the lower work-area edge that Top sits from the
-upper work-area edge. Center is the default vertical position.
+The bar can sit at the top, center, or bottom of the screen. At the bottom, the
+results open upward and the footer remains below them. Center is the default.
 
-Ordinary searches remain one unified, adaptively ranked list; the redesign does
-not add category tabs or source filters. The non-interactive mode indicator is
-derived from the existing query parsers and provider conditions, so it reports
-contexts such as Clipboard, Actions, Weather, Dictionary, Calculator, and
-Currency without changing result selection. The results area uses
-content-driven height for compact empty and short states, then scrolls after it
-reaches its bounded maximum. The footer's `> Actions` label is only a discovery
-hint for the existing action prefix, not a new control or shortcut.
+Search results stay in one list rather than being split into tabs. The small
+label beside the search field shows when Superbar has recognized something like
+a clipboard, calculator, weather, dictionary, currency, or system-action query.
 
-For visual or lifecycle testing, use a fresh nested Shell so cached extension
-modules cannot mask changes:
+When working on the Shell UI, use a fresh nested session so an older cached copy
+of the extension does not get in the way:
 
 ```bash
-# From the repository, close any older nested Shell, then start a fresh one.
 make nested
 
-# In a terminal inside the nested desktop, from this repository:
+# Run this from the repository in the nested desktop:
 make enable
 
-# Press Alt+Space to open Superbar.
+# Then press Alt+Space.
 ```
 
-Use `make status` in that nested-desktop terminal to confirm the extension is
-enabled. Run `make test` before testing, and use `make prefs` there when the
-preferences UI also needs inspection.
+`make status` shows whether the extension is enabled. Use `make prefs` to open
+its settings.
 
 ---
 
@@ -184,8 +163,8 @@ Copyright © 2026 Furkan.
 
 Superbar is licensed under GPL-2.0-or-later — see [LICENSE](LICENSE).
 
-Superbar is built for GNOME Shell and uses GNOME platform APIs. Weather,
-dictionary, and currency features use Open-Meteo (`open-meteo.com`), Free
-Dictionary API (`dictionaryapi.dev`), and Frankfurter (`frankfurter.app`).
-Clipboard history uses GNOME Shell clipboard access and is declared in
+Superbar uses GNOME Shell APIs, including clipboard access. Weather data comes
+from Open-Meteo (`open-meteo.com`), definitions from Free Dictionary API
+(`dictionaryapi.dev`), and exchange rates from Frankfurter
+(`frankfurter.app`). These services and clipboard access are also declared in
 `metadata.json`.
