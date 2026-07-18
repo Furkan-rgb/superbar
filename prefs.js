@@ -10,13 +10,88 @@ import GObject from "gi://GObject";
 import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js";
 import { SURFACE_COLOR_PRESETS } from "./appearance.js";
 
-function addComboSettingRow(group, settings, key, title, subtitle, options) {
+function addRoundedRectangle(cr, x, y, width, height, radius) {
+  cr.newSubPath();
+  cr.arc(x + width - radius, y + radius, radius, -Math.PI / 2, 0);
+  cr.arc(
+    x + width - radius,
+    y + height - radius,
+    radius,
+    0,
+    Math.PI / 2,
+  );
+  cr.arc(x + radius, y + height - radius, radius, Math.PI / 2, Math.PI);
+  cr.arc(x + radius, y + radius, radius, Math.PI, (3 * Math.PI) / 2);
+  cr.closePath();
+}
+
+function createColorPresetFactory(options) {
+  const optionsByLabel = new Map(
+    options.map((option) => [option.label, option]),
+  );
+  const factory = new Gtk.SignalListItemFactory();
+
+  factory.connect("setup", (_factory, listItem) => {
+    const swatch = new Gtk.DrawingArea({
+      content_width: 22,
+      content_height: 22,
+      valign: Gtk.Align.CENTER,
+      margin_end: 10,
+    });
+    swatch._surfaceColor = options[0].color;
+    swatch.set_draw_func((area, cr, width, height) => {
+      const [red, green, blue] = area._surfaceColor;
+      addRoundedRectangle(cr, 0.5, 0.5, width - 1, height - 1, 6);
+      cr.setSourceRGBA(red / 255, green / 255, blue / 255, 1);
+      cr.fillPreserve();
+      cr.setSourceRGBA(0.5, 0.5, 0.5, 0.55);
+      cr.setLineWidth(1);
+      cr.stroke();
+    });
+
+    const label = new Gtk.Label({ xalign: 0 });
+    const content = new Gtk.Box({
+      orientation: Gtk.Orientation.HORIZONTAL,
+      valign: Gtk.Align.CENTER,
+    });
+    content.append(swatch);
+    content.append(label);
+    content._swatch = swatch;
+    content._label = label;
+    listItem.set_child(content);
+  });
+
+  factory.connect("bind", (_factory, listItem) => {
+    const content = listItem.get_child();
+    const label = listItem.get_item().get_string();
+    const option = optionsByLabel.get(label) ?? options[0];
+    content._label.set_label(label);
+    content._swatch._surfaceColor = option.color;
+    content._swatch.queue_draw();
+  });
+
+  return factory;
+}
+
+function addComboSettingRow(
+  group,
+  settings,
+  key,
+  title,
+  subtitle,
+  options,
+  showColorSwatches = false,
+) {
   const optionKeys = options.map((option) => option.key);
   const row = new Adw.ComboRow({
     title,
     subtitle,
     model: Gtk.StringList.new(options.map((option) => option.label)),
   });
+  if (showColorSwatches) {
+    row.factory = createColorPresetFactory(options);
+    row.list_factory = createColorPresetFactory(options);
+  }
   const currentIndex = optionKeys.indexOf(settings.get_string(key));
   row.set_selected(currentIndex >= 0 ? currentIndex : 0);
   row.connect("notify::selected", () => {
@@ -342,6 +417,7 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       "Light Background",
       "Background color used in light mode",
       SURFACE_COLOR_PRESETS.light,
+      true,
     );
 
     addComboSettingRow(
@@ -351,6 +427,7 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       "Dark Background",
       "Background color used in dark mode",
       SURFACE_COLOR_PRESETS.dark,
+      true,
     );
 
     const backgroundOpacityRow = new Adw.SpinRow({
