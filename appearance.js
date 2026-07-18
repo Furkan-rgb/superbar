@@ -67,3 +67,28 @@ export function getSurfaceColor(variant, presetKey) {
   const presets = SURFACE_COLOR_PRESETS[variant];
   return presets.find(({ key }) => key === presetKey)?.color ?? presets[0].color;
 }
+
+export function resolveThemeVariant(configuredMode, systemPrefersDark) {
+  if (configuredMode === "light" || configuredMode === "dark") {
+    return configuredMode;
+  }
+
+  return systemPrefersDark ? "dark" : "light";
+}
+
+export function getSurfaceAppearance({
+  configuredMode,
+  systemPrefersDark,
+  lightPresetKey,
+  darkPresetKey,
+  opacityPercentage,
+}) {
+  const variant = resolveThemeVariant(configuredMode, systemPrefersDark);
+  const presetKey = variant === "dark" ? darkPresetKey : lightPresetKey;
+
+  return {
+    variant,
+    color: getSurfaceColor(variant, presetKey),
+    opacity: Math.min(1, Math.max(0.65, opacityPercentage / 100)),
+  };
+}

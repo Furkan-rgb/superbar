@@ -10,22 +10,23 @@ BUILD_DIR ?= build
 RENDER_SCALE ?= 2
 BUILD_ARCHIVE := $(BUILD_DIR)/$(ARCHIVE)
 
-.PHONY: help check syntax schema lint pack verify test install enable disable \
+.PHONY: help check syntax schema lint unit pack verify test install enable disable \
 	prefs status nested renders renders-light renders-dark export release clean
 
 help:
 	@printf "%-12s %s\n" \
 		"make check" "Validate JavaScript and the GSettings schema" \
 		"make lint" "Run ESLint when it is installed" \
+		"make unit" "Run the appearance logic unit tests" \
 		"make pack" "Build the extension ZIP in $(BUILD_DIR)/" \
-		"make test" "Build and verify the ZIP archive" \
+		"make test" "Run checks, build, and verify the ZIP archive" \
 		"make install" "Install the latest local build" \
 		"make enable" "Enable Superbar in the current Shell session" \
 		"make disable" "Disable Superbar in the current Shell session" \
 		"make prefs" "Open Superbar preferences" \
 		"make status" "Show the installed extension state" \
 		"make nested" "Build, install, and start a fresh nested GNOME Shell" \
-		"make renders" "Generate all deterministic showcase PNGs" \
+		"make renders" "Generate all showcase PNGs" \
 		"make renders-light" "Generate light-theme showcase PNGs" \
 		"make renders-dark" "Generate dark-theme showcase PNGs" \
 		"make export" "Build the release ZIP in $(BUILD_DIR)/; does not install it" \
@@ -56,11 +57,14 @@ lint:
 			--rule 'no-unused-vars:error' \
 			--rule 'no-dupe-keys:error' \
 			--rule 'no-unreachable:error' \
-			extension.js prefs.js appearance.js; \
+			extension.js prefs.js appearance.js tests/appearance.test.js; \
 		printf "ESLint checks passed.\n"; \
 	else \
 		printf "ESLint is not installed; skipping optional lint checks.\n"; \
 	fi
+
+unit:
+	@node --experimental-default-type=module tests/appearance.test.js
 
 pack: check
 	@mkdir -p "$(BUILD_DIR)"
@@ -72,7 +76,7 @@ verify: pack
 	@unzip -t "$(BUILD_ARCHIVE)"
 	@sha256sum "$(BUILD_ARCHIVE)"
 
-test: lint verify
+test: lint unit verify
 
 install: verify
 	@gnome-extensions install --force "$(BUILD_ARCHIVE)"

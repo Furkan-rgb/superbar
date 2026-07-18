@@ -15,7 +15,7 @@ import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import * as SystemActions from "resource:///org/gnome/shell/misc/systemActions.js";
 import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
-import { getSurfaceColor } from "./appearance.js";
+import { getSurfaceAppearance } from "./appearance.js";
 
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
@@ -3299,20 +3299,17 @@ export default class SearchBar extends Extension {
   // --- Theme ---
 
   _updateTheme() {
-    const configuredMode = this._settings?.get_string("theme-mode");
-    let styleVariant;
-    if (configuredMode === "light" || configuredMode === "dark") {
-      styleVariant = configuredMode;
-    } else {
-      // "system" (the default): follow the OS Appearance setting directly.
-      // Main.getStyleVariant() reflects the shell chrome, not the system
-      // color-scheme, so it can't be trusted for this decision.
-      styleVariant =
+    // Main.getStyleVariant() reflects the shell chrome rather than the system
+    // color-scheme, so System mode follows St.Settings directly.
+    const { variant: styleVariant, color, opacity } = getSurfaceAppearance({
+      configuredMode: this._settings.get_string("theme-mode"),
+      systemPrefersDark:
         this._shellSettings.color_scheme ===
-        St.SystemColorScheme.PREFER_DARK
-          ? "dark"
-          : "light";
-    }
+        St.SystemColorScheme.PREFER_DARK,
+      lightPresetKey: this._settings.get_string("light-color-preset"),
+      darkPresetKey: this._settings.get_string("dark-color-preset"),
+      opacityPercentage: this._settings.get_int("background-opacity"),
+    });
 
     if (styleVariant === "dark") {
       this._container.add_style_class_name("dark-mode");
@@ -3320,14 +3317,7 @@ export default class SearchBar extends Extension {
       this._container.remove_style_class_name("dark-mode");
     }
 
-    const opacity = Math.min(
-      1,
-      Math.max(0.65, this._settings.get_int("background-opacity") / 100),
-    );
-    const presetKey = this._settings.get_string(
-      `${styleVariant}-color-preset`,
-    );
-    const [red, green, blue] = getSurfaceColor(styleVariant, presetKey);
+    const [red, green, blue] = color;
     this._materialLayer.set_style(
       `background-color: rgba(${red}, ${green}, ${blue}, ${opacity});`,
     );

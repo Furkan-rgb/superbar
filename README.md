@@ -74,6 +74,7 @@ Log out and back in if this is the first time installing.
 ```bash
 make help
 make test       # validate, build, and verify the ZIP
+make unit       # test theme and background selection
 make install    # install the latest local build
 make nested     # install and start a fresh nested GNOME Shell
 make renders    # rebuild the README images
