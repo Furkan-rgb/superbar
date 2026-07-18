@@ -4,7 +4,7 @@ A keyboard-driven, system-wide launcher and command bar for GNOME Shell — insp
 
 Open it from anywhere with **Alt+Space**.
 
-![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-49%2B-blue)
+![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-49%20%7C%2050-blue)
 ![License](https://img.shields.io/badge/license-GPL--2.0-green)
 
 ---
@@ -27,13 +27,13 @@ Open it from anywhere with **Alt+Space**.
 | **App Launcher**          | Type the app name — fuzzy match, launches or focuses                   |
 | **Window Switcher**       | Type part of a window title — jumps across workspaces                  |
 | **File Search**           | Type a filename — searches home dir and common folders                 |
-| **Clipboard History**     | `clip:` or `clipboard:` prefix — browse last 50 entries                |
+| **Clipboard History**     | `clip`, `clipboard`, or `history` prefix — browse saved entries        |
 | **Weather**               | `weather <city>` — live temp, humidity, wind (Open-Meteo, no API key)  |
 | **Calculator**            | Type a math expression e.g. `2 * (3 + 4)` — result copied to clipboard |
 | **Currency Converter**    | `100 USD to EUR`                                                       |
 | **Dictionary**            | `define <word>` — English definitions via Free Dictionary API          |
 | **Web Search**            | Any unmatched query falls through to a web search                      |
-| **System Commands**       | `shutdown`, `reboot`, `logout`, `lock`, `suspend`, `screenshot`        |
+| **System Commands**       | Use `>`, `cmd`, `command`, or `action` before an action name           |
 | **Resumable Searches**    | Reopen a dismissed search within five minutes; typing replaces it      |
 | **Adaptive Ranking**      | Prioritizes strong matches, active context, and selected apps/actions  |
 | **Multi-Monitor Aware**   | Opens on the focused monitor and stays inside its usable work area     |
@@ -66,7 +66,7 @@ Log out and back in if this is the first time installing.
 
 ## Requirements
 
-- GNOME Shell 49+
+- GNOME Shell 49 or 50
 - An internet connection for weather, dictionary, and currency features
 
 ## Local development and testing
@@ -100,6 +100,45 @@ make status
 
 On X11, press **Alt+F2**, enter `r`, then enable the extension. On a regular
 Wayland session, log out and back in instead of restarting GNOME Shell in place.
+
+---
+
+## Design and implementation notes
+
+Superbar uses a restrained Liquid Glass-inspired material adapted to GNOME
+Shell rather than attempting an exact recreation of macOS. The panel separates
+its bounded background-blur layer from its tint and foreground-content layers,
+so only the desktop directly behind Superbar is blurred while text, icons, and
+results remain crisp. If `Shell.BlurEffect` is unavailable, Superbar falls back
+to the translucent tint, border, and shadow without disabling search.
+
+Ordinary searches remain one unified, adaptively ranked list; the redesign does
+not add category tabs or source filters. The non-interactive mode indicator is
+derived from the existing query parsers and provider conditions, so it reports
+contexts such as Clipboard, Actions, Weather, Dictionary, Calculator, and
+Currency without changing result selection. The results area uses
+content-driven height for compact empty and short states, then scrolls after it
+reaches its bounded maximum. The footer's `> Actions` label is only a discovery
+hint for the existing action prefix, not a new control or shortcut.
+
+Bounded background blur costs more GPU work than an opaque panel, but limiting
+the effect to Superbar's bounds—and keeping it inactive while the launcher is
+closed—avoids the cost of full-screen blur. For visual or lifecycle testing,
+use a fresh nested Shell so cached extension modules cannot mask changes:
+
+```bash
+# From the repository, close any older nested Shell, then start a fresh one.
+make nested
+
+# In a terminal inside the nested desktop, from this repository:
+make enable
+
+# Press Alt+Space to open Superbar.
+```
+
+Use `make status` in that nested-desktop terminal to confirm the extension is
+enabled. Run `make test` before testing, and use `make prefs` there when the
+preferences UI also needs inspection.
 
 ---
 

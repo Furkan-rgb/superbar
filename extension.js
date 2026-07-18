@@ -11,11 +11,18 @@ import Pango from "gi://Pango";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import * as SystemActions from "resource:///org/gnome/shell/misc/systemActions.js";
 import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
+import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
 
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
 const RESULTS_REVEAL_ANIMATION_MS = 85;
 const RESULTS_COLLAPSE_ANIMATION_MS = 45;
+const RESULTS_MIN_HEIGHT = 120;
+const RESULTS_MAX_HEIGHT_FRACTION = 0.52;
+const OPEN_ANIMATION_MS = 250;
+const OPEN_TRANSLATION_Y = -10;
+const OPEN_SCALE = 0.985;
+const BACKGROUND_BLUR_RADIUS = 30;
 const STRONG_LOCAL_MATCH_SCORE = 600;
 // Local results below this relevance score are hidden entirely (only the web
 // search remains). Substring/word/prefix matches clear it; scattered
@@ -284,12 +291,51 @@ export default class SearchBar extends Extension {
       ).get_uri(),
     }));
 
-    this._container = new St.BoxLayout({
+    this._container = new St.Widget({
       style_class: "spotlight-container",
-      vertical: true,
+      layout_manager: new Clutter.BinLayout(),
       reactive: true,
       can_focus: true,
     });
+
+    this._blurLayer = new St.Widget({
+      style_class: "spotlight-blur-layer",
+      layout_manager: new Clutter.BinLayout(),
+      x_expand: true,
+      y_expand: true,
+    });
+    this._blurSurface = new St.Widget({
+      style_class: "spotlight-blur-surface",
+      x_expand: true,
+      y_expand: true,
+      margin_top: 10,
+      margin_right: 10,
+      margin_bottom: 10,
+      margin_left: 10,
+    });
+    this._blurLayer.add_child(this._blurSurface);
+    this._materialLayer = new St.Widget({
+      style_class: "spotlight-material",
+      x_expand: true,
+      y_expand: true,
+    });
+    this._highlightLayer = new St.Widget({
+      style_class: "spotlight-highlight",
+      x_expand: true,
+      y_expand: true,
+    });
+    this._contentLayer = new St.BoxLayout({
+      style_class: "spotlight-content",
+      vertical: true,
+      x_expand: true,
+      y_expand: true,
+    });
+
+    this._container.add_child(this._blurLayer);
+    this._container.add_child(this._materialLayer);
+    this._container.add_child(this._highlightLayer);
+    this._container.add_child(this._contentLayer);
+    this._createBackgroundBlur();
 
     this._inputRow = new St.BoxLayout({
       style_class: "spotlight-input-row",
@@ -303,7 +349,7 @@ export default class SearchBar extends Extension {
     });
 
     this._entry = new St.Entry({
-      hint_text: "Search apps, windows, files, or math…",
+      hint_text: "Search",
       style_class: "spotlight-entry",
       can_focus: true,
       x_expand: true,
@@ -312,13 +358,72 @@ export default class SearchBar extends Extension {
 
     this._inputRow.add_child(this._icon);
     this._inputRow.add_child(this._entry);
-    this._container.add_child(this._inputRow);
+
+    this._modeIndicator = new St.BoxLayout({
+      style_class: "spotlight-mode-indicator",
+      vertical: false,
+      reactive: false,
+      can_focus: false,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._modeInner = new St.BoxLayout({
+      style_class: "spotlight-mode-inner",
+      vertical: false,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._modeDot = new St.Widget({
+      style_class: "spotlight-mode-dot",
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._modeLabel = new St.Label({
+      text: "All results",
+      style_class: "spotlight-mode-label",
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._modeLabel.clutter_text.set_single_line_mode(true);
+    this._modeLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+    this._modeInner.add_child(this._modeDot);
+    this._modeInner.add_child(this._modeLabel);
+    this._modeIndicator.add_child(this._modeInner);
+    this._inputRow.add_child(this._modeIndicator);
+    this._contentLayer.add_child(this._inputRow);
+
+    this._headerDivider = new St.Widget({
+      style_class: "spotlight-divider",
+      x_expand: true,
+    });
+    this._contentLayer.add_child(this._headerDivider);
 
     this._resultsBox = new St.BoxLayout({
       style_class: "spotlight-results-box",
       vertical: true,
       x_expand: true,
     });
+
+    this._statusBox = new St.BoxLayout({
+      style_class: "spotlight-status",
+      vertical: true,
+      x_expand: true,
+      y_expand: true,
+      visible: false,
+    });
+    this._statusSpinner = new Spinner(22, {
+      animate: false,
+      hideOnStop: true,
+    });
+    this._statusSpinner.add_style_class_name("spotlight-status-icon");
+    this._statusSpinner.x_align = Clutter.ActorAlign.CENTER;
+    this._statusLabel = new St.Label({
+      style_class: "spotlight-status-label",
+      x_align: Clutter.ActorAlign.CENTER,
+      x_expand: true,
+    });
+    this._statusLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+    this._statusLabel.clutter_text.set_single_line_mode(true);
+    this._statusLabel.clutter_text.set_line_alignment(Pango.Alignment.CENTER);
+    this._statusBox.add_child(this._statusSpinner);
+    this._statusBox.add_child(this._statusLabel);
+    this._resultsBox.add_child(this._statusBox);
 
     this._resultsScroll = new St.ScrollView({
       style_class: "spotlight-results-scroll",
@@ -340,7 +445,66 @@ export default class SearchBar extends Extension {
     this._resultsClip.add_child(this._resultsScroll);
     this._resultsScroll.height = 0;
     this._resultsClip.height = 0;
-    this._container.add_child(this._resultsClip);
+    this._contentLayer.add_child(this._resultsClip);
+
+    this._footerDivider = new St.Widget({
+      style_class: "spotlight-divider spotlight-footer-divider",
+      x_expand: true,
+    });
+    this._contentLayer.add_child(this._footerDivider);
+
+    this._footer = new St.BoxLayout({
+      style_class: "spotlight-footer",
+      vertical: false,
+      x_expand: true,
+    });
+    this._actionsHint = new St.BoxLayout({
+      style_class: "spotlight-actions-hint",
+      vertical: false,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._actionsHint.add_child(
+      new St.Label({
+        text: ">",
+        style_class: "spotlight-footer-key spotlight-actions-key",
+      }),
+    );
+    this._actionsHint.add_child(
+      new St.Label({
+        text: "Actions",
+        style_class: "spotlight-footer-label",
+      }),
+    );
+    this._footer.add_child(this._actionsHint);
+    this._footerSpacer = new St.Widget({ x_expand: true });
+    this._footer.add_child(this._footerSpacer);
+
+    this._footerHints = new St.BoxLayout({
+      style_class: "spotlight-footer-hints",
+      vertical: false,
+      x_align: Clutter.ActorAlign.END,
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    const createFooterHint = (key, label) => {
+      const hint = new St.BoxLayout({
+        style_class: "spotlight-footer-hint",
+        vertical: false,
+        y_align: Clutter.ActorAlign.CENTER,
+      });
+      hint.add_child(
+        new St.Label({ text: key, style_class: "spotlight-footer-key" }),
+      );
+      hint.add_child(
+        new St.Label({ text: label, style_class: "spotlight-footer-label" }),
+      );
+      this._footerHints.add_child(hint);
+      return hint;
+    };
+    this._navigateHint = createFooterHint("↑↓", "Navigate");
+    this._openHint = createFooterHint("↵", "Open");
+    this._closeHint = createFooterHint("Esc", "Close");
+    this._footer.add_child(this._footerHints);
+    this._contentLayer.add_child(this._footer);
 
     this._entry.clutter_text.connectObject(
       "key-press-event",
@@ -400,13 +564,18 @@ export default class SearchBar extends Extension {
 
     this._container.set_pivot_point(0.5, 0.5);
     this._container.opacity = 0;
-    this._container.scale_x = 0.95;
-    this._container.scale_y = 0.95;
+    this._container.scale_x = OPEN_SCALE;
+    this._container.scale_y = OPEN_SCALE;
+    this._container.translation_y = OPEN_TRANSLATION_Y;
     this._container.hide();
 
     this._searchOpen = false;
     this._selectedIndex = -1;
     this._results = [];
+    this._resultRows = [];
+    this._resultMetadataActors = [];
+    this._resultsState = "hidden";
+    this._updateModeIndicator("");
 
     this._shellSettings = St.Settings.get();
     this._shellSettings.connectObject(
@@ -419,7 +588,11 @@ export default class SearchBar extends Extension {
     Main.sessionMode.connectObject("updated", () => this._updateTheme(), this);
     St.ThemeContext.get_for_stage(global.stage).connectObject(
       "changed",
-      () => this._updateTheme(),
+      () => {
+        this._updateTheme();
+        this._repositionContainer();
+        this._queueResultsHeightUpdate();
+      },
       this,
     );
     Main.layoutManager.connectObject(
@@ -429,14 +602,20 @@ export default class SearchBar extends Extension {
     );
     global.display.connectObject(
       "workareas-changed",
-      () => this._repositionContainer(),
+      () => {
+        this._repositionContainer();
+        this._queueResultsHeightUpdate();
+      },
       this._container,
     );
     this._updateTheme();
 
     this._settings.connectObject(
       "changed::bar-width",
-      () => this._repositionContainer(),
+      () => {
+        this._repositionContainer();
+        this._queueResultsHeightUpdate();
+      },
       "changed::bar-position",
       () => this._repositionContainer(),
       "changed::theme-mode",
@@ -474,6 +653,7 @@ export default class SearchBar extends Extension {
     this._removeSource("_clipboardPollId");
     this._cancelPendingSearch();
     this._removeSource("_selectionScrollTimeoutId");
+    this._removeSource("_resultsHeightTimeoutId");
 
     this._settings?.disconnectObject(this);
     this._appSystem?.disconnectObject(this);
@@ -494,7 +674,13 @@ export default class SearchBar extends Extension {
       this._clickShield = null;
     }
 
+    this._resultsClip?.remove_all_transitions();
     if (this._resultsBox) this._clearResults();
+
+    if (this._blurSurface && this._blurEffect) {
+      this._blurSurface.remove_effect(this._blurEffect);
+      this._blurEffect = null;
+    }
 
     if (this._container) {
       this._container.remove_all_transitions();
@@ -511,9 +697,30 @@ export default class SearchBar extends Extension {
     this._icon = null;
     this._entry = null;
     this._inputRow = null;
+    this._modeIndicator = null;
+    this._modeInner = null;
+    this._modeDot = null;
+    this._modeLabel = null;
+    this._headerDivider = null;
     this._resultsBox = null;
     this._resultsScroll = null;
     this._resultsClip = null;
+    this._statusBox = null;
+    this._statusSpinner = null;
+    this._statusLabel = null;
+    this._footerDivider = null;
+    this._footer = null;
+    this._actionsHint = null;
+    this._footerSpacer = null;
+    this._footerHints = null;
+    this._navigateHint = null;
+    this._openHint = null;
+    this._closeHint = null;
+    this._contentLayer = null;
+    this._highlightLayer = null;
+    this._materialLayer = null;
+    this._blurSurface = null;
+    this._blurLayer = null;
     this._settings = null;
     this._appSystem = null;
     this._appUsage = null;
@@ -526,11 +733,41 @@ export default class SearchBar extends Extension {
     this._rankingHistory?.clear();
     this._rankingHistory = null;
     this._results = null;
+    this._resultRows = null;
+    this._resultMetadataActors = null;
+    this._resultsState = null;
     this._selectedIndex = -1;
     this._pendingActivation = null;
     this._resumableSession = null;
     this._activeMonitorIndex = null;
     this._searchOpen = false;
+  }
+
+  _createBackgroundBlur() {
+    this._blurEffect = null;
+
+    if (!Shell.BlurEffect || Shell.BlurMode?.BACKGROUND === undefined) {
+      this._container.add_style_class_name("no-background-blur");
+      return;
+    }
+
+    try {
+      const scaleFactor =
+        St.ThemeContext.get_for_stage(global.stage).scale_factor;
+      this._blurEffect = new Shell.BlurEffect({
+        mode: Shell.BlurMode.BACKGROUND,
+        radius: BACKGROUND_BLUR_RADIUS * scaleFactor,
+        brightness: 1.0,
+      });
+      this._blurSurface.add_effect_with_name(
+        "superbar-background-blur",
+        this._blurEffect,
+      );
+    } catch (error) {
+      this._blurEffect = null;
+      this._container.add_style_class_name("no-background-blur");
+      console.warn(`[Superbar] Background blur unavailable: ${error.message}`);
+    }
   }
 
   _removeSource(propertyName) {
@@ -808,6 +1045,10 @@ export default class SearchBar extends Extension {
     );
 
     this._container.remove_all_transitions();
+    this._container.opacity = 0;
+    this._container.scale_x = OPEN_SCALE;
+    this._container.scale_y = OPEN_SCALE;
+    this._container.translation_y = OPEN_TRANSLATION_Y;
     this._container.show();
     global.stage.set_key_focus(this._entry);
     if (resumed) this._entry.clutter_text.set_selection(0, -1);
@@ -816,8 +1057,9 @@ export default class SearchBar extends Extension {
       opacity: 255,
       scale_x: 1.0,
       scale_y: 1.0,
-      time: 180,
-      transition: Clutter.AnimationMode.EASE_OUT_CUBIC,
+      translation_y: 0,
+      duration: OPEN_ANIMATION_MS,
+      mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
     });
   }
 
@@ -843,10 +1085,10 @@ export default class SearchBar extends Extension {
     this._container.remove_all_transitions();
     this._container.ease({
       opacity: 0,
-      scale_x: 0.95,
-      scale_y: 0.95,
-      time: 130,
-      transition: Clutter.AnimationMode.EASE_IN_QUAD,
+      scale_x: OPEN_SCALE,
+      scale_y: OPEN_SCALE,
+      duration: 130,
+      mode: Clutter.AnimationMode.EASE_IN_QUAD,
       onComplete: () => {
         if (this._searchOpen || !this._container) return;
 
@@ -865,8 +1107,7 @@ export default class SearchBar extends Extension {
     if (this._entry.get_text().length > 0) {
       this._entry.set_text("");
     } else {
-      this._clearResults();
-      this._setResultsHeight(0);
+      this._hideResults();
     }
   }
 
@@ -882,8 +1123,7 @@ export default class SearchBar extends Extension {
     this._updateSearchIcon(text);
 
     if (text.length === 0) {
-      this._clearResults();
-      this._setResultsHeight(0);
+      this._hideResults();
       return;
     }
 
@@ -937,6 +1177,7 @@ export default class SearchBar extends Extension {
               subtitle: "Press Enter to copy",
               icon: "accessories-calculator-symbolic",
               value: String(calcResult),
+              answerContext: text,
             },
           ],
           preserveSelection,
@@ -988,8 +1229,7 @@ export default class SearchBar extends Extension {
   }
 
   _scheduleRemoteSearch(text, generation, callback) {
-    this._clearResults();
-    this._setResultsHeight(0);
+    this._showStatus("loading", "Searching…");
 
     this._removeSource("_searchTimeout");
     this._searchTimeout = GLib.timeout_add(
@@ -1013,23 +1253,47 @@ export default class SearchBar extends Extension {
   }
 
   _updateSearchIcon(text) {
-    let iconName = "system-search-symbolic";
+    const mode = this._getQueryMode(text);
+    this._icon.icon_name = mode.iconName;
+    this._updateModeIndicator(text, mode);
+  }
 
+  _getQueryMode(text) {
+    if (this._isCurrencyExpression(text)) {
+      return { label: "Currency", iconName: "view-refresh-symbolic" };
+    }
+    if (this._isWeatherQuery(text)) {
+      return { label: "Weather", iconName: "weather-clear-symbolic" };
+    }
+    if (/^def(?:ine)?\s+/i.test(text)) {
+      return {
+        label: "Dictionary",
+        iconName: "accessories-dictionary-symbolic",
+      };
+    }
     if (this._parseClipboardQuery(text) !== null) {
-      iconName = "edit-paste-symbolic";
-    } else if (this._parseActionQuery(text) !== null) {
-      iconName = "system-run-symbolic";
-    } else if (this._isCurrencyExpression(text)) {
-      iconName = "view-refresh-symbolic";
-    } else if (this._isWeatherQuery(text)) {
-      iconName = "weather-clear-symbolic";
-    } else if (/^def(?:ine)?\s+/i.test(text)) {
-      iconName = "accessories-dictionary-symbolic";
-    } else if (this._isMathExpression(text)) {
-      iconName = "accessories-calculator-symbolic";
+      return { label: "Clipboard", iconName: "edit-paste-symbolic" };
+    }
+    if (this._parseActionQuery(text) !== null) {
+      return { label: "Actions", iconName: "system-run-symbolic" };
+    }
+    if (
+      this._isMathExpression(text) &&
+      this._evaluate(text) !== null
+    ) {
+      return {
+        label: "Calculator",
+        iconName: "accessories-calculator-symbolic",
+      };
     }
 
-    this._icon.icon_name = iconName;
+    return { label: "All results", iconName: "system-search-symbolic" };
+  }
+
+  _updateModeIndicator(text, mode = null) {
+    if (!this._modeLabel) return;
+
+    this._modeLabel.text = (mode ?? this._getQueryMode(text)).label;
   }
 
   _buildGenericResults(text, fileResults = []) {
@@ -2021,7 +2285,10 @@ export default class SearchBar extends Extension {
       if (!this._isCurrentQuery(text, generation)) return;
 
       const geoData = JSON.parse(new TextDecoder().decode(geoBytes.get_data()));
-      if (!geoData.results?.length) return;
+      if (!geoData.results?.length) {
+        this._showNoResults(text);
+        return;
+      }
 
       const { name, latitude, longitude, country_code } = geoData.results[0];
       const cityName = country_code
@@ -2064,7 +2331,12 @@ export default class SearchBar extends Extension {
         },
       ]);
     } catch (_e) {
-      // weather lookup failed; silently ignore
+      if (
+        this._isCurrentQuery(text, generation) &&
+        !cancellable?.is_cancelled()
+      ) {
+        this._showStatus("error", "Weather is unavailable right now");
+      }
     }
   }
 
@@ -2138,11 +2410,19 @@ export default class SearchBar extends Extension {
             subtitle: "Dictionary definition",
             icon: "accessories-dictionary-symbolic",
             query: word,
+            metadata: "Definition",
           },
         ]);
+      } else {
+        this._showNoResults(text);
       }
     } catch (_e) {
-      // dictionary lookup failed; silently ignore
+      if (
+        this._isCurrentQuery(text, generation) &&
+        !cancellable?.is_cancelled()
+      ) {
+        this._showStatus("error", "Dictionary is unavailable right now");
+      }
     }
   }
 
@@ -2167,7 +2447,10 @@ export default class SearchBar extends Extension {
     const from = commonNames[parts[1]] || parts[1].toUpperCase();
     const to = commonNames[parts[3]] || parts[3].toUpperCase();
 
-    if (from.length !== 3 || to.length !== 3) return;
+    if (from.length !== 3 || to.length !== 3) {
+      if (this._isCurrentQuery(text, generation)) this._showNoResults(text);
+      return;
+    }
 
     try {
       const url = `https://api.frankfurter.app/latest?amount=${amount}&from=${from}&to=${to}`;
@@ -2188,11 +2471,19 @@ export default class SearchBar extends Extension {
             subtitle: "Press Enter to copy",
             icon: "view-refresh-symbolic",
             value: String(data.rates[to]),
+            answerContext: text,
           },
         ]);
+      } else {
+        this._showNoResults(text);
       }
     } catch (_e) {
-      // currency fetch failed; silently ignore
+      if (
+        this._isCurrentQuery(text, generation) &&
+        !cancellable?.is_cancelled()
+      ) {
+        this._showStatus("error", "Currency conversion is unavailable");
+      }
     }
   }
 
@@ -2247,7 +2538,13 @@ export default class SearchBar extends Extension {
         ? this._results[this._selectedIndex]
         : null;
 
-    this._clearResults();
+    if (results.length === 0) {
+      this._showNoResults(this._entry?.get_text().trim() ?? "");
+      return;
+    }
+
+    this._resultsState = "rows";
+    this._footerDivider.show();
     this._results = results;
     this._selectedIndex = selectedResult
       ? results.findIndex((result) =>
@@ -2255,85 +2552,124 @@ export default class SearchBar extends Extension {
         )
       : -1;
 
-    if (results.length === 0) {
-      this._setResultsHeight(0);
-      return;
-    }
-
     if (this._consumePendingActivation()) {
       this._activateResult(0);
       return;
     }
 
+    this._prepareResultRows(results.length);
+
     results.forEach((result, index) => {
-      const row = new St.Button({
-        style_class: "spotlight-result-row",
-        x_expand: true,
-        can_focus: false,
-      });
+      const row = this._resultRows[index];
+      row._superbarIndex = index;
+      row._superbarType = result.type;
+      row.add_style_class_name(`result-${result.type}`);
 
       if (result.type === "weather") {
         row.add_style_class_name("weather-card");
-
-        const topRow = new St.BoxLayout({ vertical: false, x_expand: true });
-        topRow.add_child(
-          new St.Icon({
-            icon_name: result.icon,
-            style_class: "weather-card-icon",
-          }),
-        );
-        topRow.add_child(
-          new St.Label({
-            text: result.temp,
-            style_class: "weather-temp",
-            y_align: Clutter.ActorAlign.CENTER,
-          }),
-        );
 
         const infoBox = new St.BoxLayout({
           vertical: true,
           x_expand: true,
           y_align: Clutter.ActorAlign.CENTER,
         });
-        infoBox.add_child(
-          new St.Label({
-            text: result.description,
-            style_class: "weather-desc",
-          }),
-        );
-        infoBox.add_child(
-          new St.Label({ text: result.city, style_class: "weather-city" }),
-        );
-        topRow.add_child(infoBox);
+        const cityLabel = new St.Label({
+          text: result.city,
+          style_class: "weather-city",
+          x_expand: true,
+        });
+        cityLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+        cityLabel.clutter_text.set_single_line_mode(true);
+        const descriptionLabel = new St.Label({
+          text: result.description,
+          style_class: "weather-desc",
+          x_expand: true,
+        });
+        descriptionLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+        descriptionLabel.clutter_text.set_single_line_mode(true);
+        const detailsLabel = new St.Label({
+          text: result.details,
+          style_class: "weather-details",
+          x_expand: true,
+        });
+        detailsLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+        detailsLabel.clutter_text.set_single_line_mode(true);
+        infoBox.add_child(cityLabel);
+        infoBox.add_child(descriptionLabel);
+        infoBox.add_child(detailsLabel);
 
-        const card = new St.BoxLayout({ vertical: true, x_expand: true });
-        card.add_child(topRow);
+        const card = new St.BoxLayout({
+          style_class: "spotlight-weather-content",
+          vertical: false,
+          x_expand: true,
+        });
+        const weatherIconTile = this._createResultIcon(result);
+        weatherIconTile.add_style_class_name("weather-icon-tile");
+        card.add_child(weatherIconTile);
+        card.add_child(infoBox);
         card.add_child(
           new St.Label({
-            text: result.details,
-            style_class: "weather-details",
-            x_expand: true,
+            text: result.temp,
+            style_class: "weather-temp",
+            y_align: Clutter.ActorAlign.CENTER,
           }),
         );
         row.set_child(card);
-      } else {
-        if (result.type === "calc") row.add_style_class_name("answer");
+      } else if (result.type === "calc") {
+        row.add_style_class_name("answer");
 
-        const rowBox = new St.BoxLayout({ vertical: false, x_expand: true });
-        const icon = result.gicon
-          ? new St.Icon({
-              gicon: result.gicon,
-              icon_size: 24,
-              style_class: "spotlight-result-icon",
-              y_align: Clutter.ActorAlign.CENTER,
-            })
-          : new St.Icon({
-              icon_name: result.icon || "system-search-symbolic",
-              icon_size: 24,
-              style_class: "spotlight-result-icon",
-              y_align: Clutter.ActorAlign.CENTER,
-            });
-        rowBox.add_child(icon);
+        const answerBox = new St.BoxLayout({
+          style_class: "spotlight-answer-content",
+          vertical: false,
+          x_expand: true,
+        });
+        answerBox.add_child(this._createResultIcon(result));
+
+        const answerText = new St.BoxLayout({
+          vertical: true,
+          x_expand: true,
+          y_align: Clutter.ActorAlign.CENTER,
+          style_class: "spotlight-result-text",
+        });
+        if (result.answerContext) {
+          const contextLabel = new St.Label({
+            text: result.answerContext,
+            style_class: "spotlight-answer-context",
+            x_expand: true,
+          });
+          contextLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+          contextLabel.clutter_text.set_single_line_mode(true);
+          answerText.add_child(contextLabel);
+        }
+        const answerValueLabel = new St.Label({
+          text: result.label,
+          style_class: "spotlight-result-label",
+          x_expand: true,
+        });
+        answerValueLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+        answerValueLabel.clutter_text.set_single_line_mode(true);
+        answerText.add_child(answerValueLabel);
+        if (result.subtitle) {
+          const answerSubtitleLabel = new St.Label({
+            text: result.subtitle,
+            style_class: "spotlight-result-subtitle",
+            x_expand: true,
+          });
+          answerSubtitleLabel.clutter_text.set_ellipsize(
+            Pango.EllipsizeMode.END,
+          );
+          answerSubtitleLabel.clutter_text.set_single_line_mode(true);
+          answerText.add_child(answerSubtitleLabel);
+        }
+        answerBox.add_child(answerText);
+        row.set_child(answerBox);
+      } else {
+        const rowBox = new St.BoxLayout({
+          style_class: "spotlight-result-row-content",
+          vertical: false,
+          x_expand: true,
+        });
+        rowBox.add_child(this._createResultIcon(result));
 
         const textBox = new St.BoxLayout({
           vertical: true,
@@ -2362,33 +2698,149 @@ export default class SearchBar extends Extension {
         }
 
         rowBox.add_child(textBox);
+
+        const metadata = this._getResultMetadata(result);
+        if (metadata) {
+          const metadataLabel = new St.Label({
+            text: metadata,
+            style_class: "spotlight-result-metadata",
+            y_align: Clutter.ActorAlign.CENTER,
+          });
+          metadataLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+          metadataLabel.clutter_text.set_single_line_mode(true);
+          this._resultMetadataActors.push(metadataLabel);
+          rowBox.add_child(metadataLabel);
+        }
+
         row.set_child(rowBox);
       }
-
-      row.connectObject("clicked", () => this._activateResult(index), this);
-      this._resultsBox.add_child(row);
     });
 
+    this._applyResponsiveVisibility();
     this._updateSelection();
+    this._updateResultsHeight();
+  }
 
-    this._resultsBox.queue_relayout();
-    const preferredWidth = Math.max(
-      1,
-      this._resultsBox.width,
-      this._container.width,
-    );
-    const [, naturalHeight] =
-      this._resultsBox.get_preferred_height(preferredWidth);
-    this._setResultsHeight(Math.min(naturalHeight, 450));
+  _prepareResultRows(count) {
+    this._removeSource("_selectionScrollTimeoutId");
+    this._statusSpinner.stop();
+    this._statusBox.hide();
+    this._resultMetadataActors = [];
+
+    while (this._resultRows.length > count) {
+      const row = this._resultRows.pop();
+      row.disconnectObject(this);
+      row.destroy();
+    }
+
+    while (this._resultRows.length < count) {
+      const row = new St.Button({
+        style_class: "spotlight-result-row",
+        x_expand: true,
+        can_focus: false,
+      });
+      row._superbarIndex = this._resultRows.length;
+      row.connectObject(
+        "clicked",
+        () => this._activateResult(row._superbarIndex),
+        this,
+      );
+      this._resultRows.push(row);
+      this._resultsBox.add_child(row);
+    }
+
+    this._resultRows.forEach((row) => {
+      row.remove_style_class_name("answer");
+      row.remove_style_class_name("weather-card");
+      row.remove_style_class_name("selected");
+      row.remove_style_class_name("inactive-selection");
+      if (row._superbarType) {
+        row.remove_style_class_name(`result-${row._superbarType}`);
+      }
+
+      row.get_child()?.destroy();
+      row._superbarType = null;
+    });
+  }
+
+  _createResultIcon(result) {
+    const tile = new St.Widget({
+      style_class: "spotlight-result-icon-tile",
+      layout_manager: new Clutter.BinLayout(),
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    const icon = result.gicon
+      ? new St.Icon({
+          gicon: result.gicon,
+          icon_size: 24,
+          style_class: "spotlight-result-icon",
+          x_align: Clutter.ActorAlign.CENTER,
+          y_align: Clutter.ActorAlign.CENTER,
+        })
+      : new St.Icon({
+          icon_name: result.icon || "system-search-symbolic",
+          icon_size: 24,
+          style_class: "spotlight-result-icon",
+          x_align: Clutter.ActorAlign.CENTER,
+          y_align: Clutter.ActorAlign.CENTER,
+        });
+    tile.add_child(icon);
+    return tile;
+  }
+
+  _getResultMetadata(result) {
+    if (result.metadata) return result.metadata;
+
+    const labels = {
+      app: "App",
+      window: "Window",
+      file: result.subtitle?.startsWith("Folder") ? "Folder" : "File",
+      web: "Web",
+      clipboard: "Clipboard",
+      system: "Action",
+    };
+    return labels[result.type] ?? "";
+  }
+
+  _showNoResults(query) {
+    this._showStatus("empty", `No Results for ‘${query}’`);
+  }
+
+  _showStatus(kind, message) {
+    this._clearResults();
+    this._resultsState = kind;
+    this._footerDivider.show();
+    this._statusBox.remove_style_class_name("empty");
+    this._statusBox.remove_style_class_name("loading");
+    this._statusBox.remove_style_class_name("error");
+    this._statusBox.add_style_class_name(kind);
+    this._statusLabel.text = message;
+    this._statusBox.show();
+    if (kind === "loading") this._statusSpinner.play();
+    else this._statusSpinner.stop();
+    this._updateResultsHeight();
+  }
+
+  _hideResults() {
+    this._clearResults();
+    this._resultsState = "hidden";
+    this._footerDivider.hide();
+    this._setResultsHeight(0);
   }
 
   _clearResults() {
+    this._resultsState = "clearing";
     this._results = [];
     this._selectedIndex = -1;
-    this._resultsBox.get_children().forEach((child) => {
-      child.disconnectObject(this);
-      child.destroy();
+    this._removeSource("_selectionScrollTimeoutId");
+    this._resultRows.forEach((row) => {
+      row.disconnectObject(this);
+      row.destroy();
     });
+    this._resultRows = [];
+    this._resultMetadataActors = [];
+    this._statusSpinner?.stop();
+    this._statusBox?.hide();
   }
 
   _activateResult(index) {
@@ -2468,7 +2920,7 @@ export default class SearchBar extends Extension {
   }
 
   _updateSelection() {
-    const rows = this._resultsBox.get_children();
+    const rows = this._resultRows;
     rows.forEach((row, i) => {
       row.remove_style_class_name("selected");
       row.remove_style_class_name("inactive-selection");
@@ -2505,17 +2957,72 @@ export default class SearchBar extends Extension {
   _scrollToSelection() {
     if (this._selectedIndex < 0) return;
 
-    const row = this._resultsBox.get_child_at_index(this._selectedIndex);
+    const row = this._resultRows[this._selectedIndex];
     if (!row) return;
 
     ensureActorVisibleInScrollView(this._resultsScroll, row);
   }
 
-  _setResultsHeight(targetHeight) {
+  _getResultsMaxHeight() {
+    const monitors = Main.layoutManager.monitors ?? [];
+    let monitorIndex = this._activeMonitorIndex;
+    if (
+      !Number.isInteger(monitorIndex) ||
+      monitorIndex < 0 ||
+      monitorIndex >= monitors.length
+    ) {
+      monitorIndex = this._getTargetMonitorIndex();
+    }
+
+    const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+    if (!workArea) return 450;
+
+    return Math.max(
+      RESULTS_MIN_HEIGHT,
+      Math.floor(workArea.height * RESULTS_MAX_HEIGHT_FRACTION),
+    );
+  }
+
+  _updateResultsHeight(animate = true) {
+    if (!this._resultsBox || this._resultsState === "hidden") return;
+
+    this._resultsBox.queue_relayout();
+    const preferredWidth = Math.max(
+      1,
+      this._resultsBox.width,
+      this._resultsClip.width,
+      this._container.width,
+    );
+    const [, naturalHeight] =
+      this._resultsBox.get_preferred_height(preferredWidth);
+    const height = Math.min(
+      Math.max(RESULTS_MIN_HEIGHT, naturalHeight),
+      this._getResultsMaxHeight(),
+    );
+    this._setResultsHeight(height, animate);
+  }
+
+  _queueResultsHeightUpdate() {
+    this._removeSource("_resultsHeightTimeoutId");
+    if (this._resultsState === "hidden") return;
+
+    this._resultsHeightTimeoutId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      0,
+      () => {
+        this._resultsHeightTimeoutId = null;
+        if (this._enabled) this._updateResultsHeight(false);
+        return GLib.SOURCE_REMOVE;
+      },
+    );
+  }
+
+  _setResultsHeight(targetHeight, animate = true) {
     const height = Math.max(0, targetHeight);
     const currentHeight = Math.max(0, this._resultsClip.height);
     const isShrinking = height < currentHeight;
     const shouldAnimate =
+      animate &&
       this._searchOpen &&
       currentHeight !== height &&
       (currentHeight === 0 || isShrinking);
@@ -2531,10 +3038,10 @@ export default class SearchBar extends Extension {
 
     this._resultsClip.ease({
       height,
-      time: isShrinking
+      duration: isShrinking
         ? RESULTS_COLLAPSE_ANIMATION_MS
         : RESULTS_REVEAL_ANIMATION_MS,
-      transition: Clutter.AnimationMode.EASE_OUT_CUBIC,
+      mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
       onComplete: () => this._repositionContainer(),
     });
   }
@@ -2566,6 +3073,7 @@ export default class SearchBar extends Extension {
       : null;
     this._resizeClickShield();
     this._repositionContainer();
+    this._queueResultsHeightUpdate();
   }
 
   _resizeClickShield() {
@@ -2601,17 +3109,14 @@ export default class SearchBar extends Extension {
     );
     const containerWidth = Math.min(configuredWidth, availableWidth);
     const positionKey = this._settings.get_string("bar-position");
-    const fractionMap = { top: 0.25, center: 0.4, bottom: 0.65 };
+    const fractionMap = { top: 0.12, center: 0.22, bottom: 0.58 };
     const fraction = fractionMap[positionKey] ?? fractionMap.center;
 
     this._container.set_size(containerWidth, -1);
+    this._applyResponsiveVisibility(containerWidth);
     const [, naturalHeight] =
       this._container.get_preferred_height(containerWidth);
-    const containerHeight = Math.max(
-      1,
-      this._container.height,
-      naturalHeight,
-    );
+    const containerHeight = Math.max(1, naturalHeight);
     const minimumY = workArea.y + MONITOR_EDGE_MARGIN;
     const maximumY = Math.max(
       minimumY,
@@ -2626,6 +3131,25 @@ export default class SearchBar extends Extension {
       workArea.x + Math.floor((workArea.width - containerWidth) / 2);
 
     this._container.set_position(x, y);
+  }
+
+  _applyResponsiveVisibility(width = null) {
+    const availableWidth = width ?? this._container?.width ?? 0;
+    if (availableWidth <= 0) return;
+
+    if (this._modeIndicator) {
+      this._modeIndicator.visible = availableWidth >= 560;
+    }
+    if (this._navigateHint) {
+      this._navigateHint.visible = availableWidth >= 680;
+    }
+    if (this._openHint) this._openHint.visible = availableWidth >= 440;
+    if (this._closeHint) this._closeHint.visible = availableWidth >= 400;
+
+    const showMetadata = availableWidth >= 620;
+    this._resultMetadataActors?.forEach((actor) => {
+      actor.visible = showMetadata;
+    });
   }
 
   // --- Theme ---
@@ -2649,6 +3173,13 @@ export default class SearchBar extends Extension {
       this._container.add_style_class_name("dark-mode");
     } else {
       this._container.remove_style_class_name("dark-mode");
+    }
+
+    if (this._blurEffect) {
+      this._blurEffect.brightness = styleVariant === "dark" ? 0.78 : 1.0;
+      this._blurEffect.radius =
+        BACKGROUND_BLUR_RADIUS *
+        St.ThemeContext.get_for_stage(global.stage).scale_factor;
     }
 
     this._applySystemTextColor(styleVariant);

@@ -1,217 +1,569 @@
 /* =====================================================================
- * 1. BASE STYLES (Light Mode)
+ * Superbar liquid glass
+ *
+ * The blur itself is provided by the Shell.BlurEffect attached to the
+ * inset blur surface. This stylesheet supplies the translucent material, its
+ * restrained edge highlight, and the foreground component styling.
  * ===================================================================== */
 
-.spotlight-container {
-    width: 600px;
-    border-radius: 30px;
-    padding: 6px 12px;
+/* ---------------------------------------------------------------------
+ * 1. Glass surface and foreground stack
+ * --------------------------------------------------------------------- */
 
-    /* Fallback text color; overridden at runtime with the shell theme's
-       foreground color when its variant matches. Result labels inherit it. */
-    color: rgba(0, 0, 0, 0.9);
-    background-color: rgba(250, 250, 250, 0.90);
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    box-shadow: 0px 16px 32px rgba(0, 0, 0, 0.08);
+.spotlight-container {
+    border-radius: 28px;
+    color: rgba(20, 28, 39, 0.93);
 }
 
+.spotlight-blur-layer,
+.spotlight-blur-surface,
+.spotlight-material,
+.spotlight-highlight,
+.spotlight-content {
+    border-radius: 28px;
+}
+
+.spotlight-blur-surface {
+    /* Shell.BlurEffect clips only to a rectangle. The inset keeps that
+       rectangle inside the panel's 28px rounded outline. */
+    border-radius: 18px;
+    background-color: rgba(255, 255, 255, 0.01);
+}
+
+.spotlight-material {
+    background-color: rgba(233, 241, 246, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 24px 70px rgba(0, 22, 45, 0.20);
+}
+
+.spotlight-highlight {
+    background-gradient-direction: vertical;
+    background-gradient-start: rgba(255, 255, 255, 0.075);
+    background-gradient-end: rgba(255, 255, 255, 0.0);
+}
+
+.no-background-blur .spotlight-material {
+    background-color: rgba(233, 241, 246, 0.72);
+}
+
+.spotlight-content {
+    background-color: transparent;
+}
+
+/* ---------------------------------------------------------------------
+ * 2. Search header and mode indicator
+ * --------------------------------------------------------------------- */
+
 .spotlight-input-row {
-    spacing: 6px;
+    height: 64px;
+    padding: 0 16px;
+    spacing: 12px;
 }
 
 .spotlight-icon {
-    icon-size: 24px;
-    color: rgba(0, 0, 0, 0.5);
+    icon-size: 20px;
+    color: rgba(25, 38, 53, 0.58);
 }
 
-.spotlight-entry {
-    font-size: 22pt;
-    font-weight: 300;
-    color: rgba(0, 0, 0, 0.9);
-    caret-color: #007aff;
-    caret-size: 2px;
-}
-
-.spotlight-entry, .spotlight-entry:focus {
-    background-color: transparent;
+.spotlight-entry,
+.spotlight-entry:focus {
+    padding: 0;
     border: none;
+    border-radius: 0;
+    background-color: transparent;
     box-shadow: none;
-}
-
-.spotlight-entry:selected {
-    background-color: rgba(0, 122, 255, 0.2);
-    color: black;
+    color: rgba(20, 28, 39, 0.93);
+    caret-color: rgba(0, 104, 225, 0.94);
+    caret-size: 2px;
+    selection-background-color: rgba(71, 153, 225, 0.22);
+    selected-color: rgba(20, 28, 39, 0.96);
+    font-size: 24px;
+    font-weight: 300;
 }
 
 .spotlight-entry StLabel.hint-text {
-    color: rgba(0, 0, 0, 0.38);
+    color: rgba(31, 42, 56, 0.37);
 }
 
-/* =====================================================================
- * 2. RESULTS AREA (Layout & Rows)
- * ===================================================================== */
+.spotlight-mode-indicator {
+    padding: 3px;
+    border-radius: 999px;
+    background-color: rgba(39, 57, 76, 0.10);
+}
+
+.spotlight-mode-inner {
+    min-height: 22px;
+    padding: 0 10px;
+    spacing: 7px;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.58);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+}
+
+.spotlight-mode-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background-color: rgba(61, 151, 229, 0.78);
+}
+
+.spotlight-mode-label {
+    color: rgba(24, 36, 50, 0.61);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.spotlight-divider {
+    height: 1px;
+    background-color: rgba(31, 49, 66, 0.10);
+}
+
+/* ---------------------------------------------------------------------
+ * 3. Results viewport, stable status, and scrollbar
+ * --------------------------------------------------------------------- */
+
+.spotlight-results-clip,
+.spotlight-results-scroll {
+    background-color: transparent;
+}
 
 .spotlight-results-box {
+    padding: 8px 6px;
     spacing: 2px;
-    padding: 4px;
 }
+
+.spotlight-status {
+    padding: 40px 20px;
+    spacing: 10px;
+    color: rgba(26, 38, 52, 0.54);
+}
+
+.spotlight-status.loading {
+    padding: 28px 20px;
+    spacing: 12px;
+}
+
+.spotlight-status-icon {
+    icon-size: 22px;
+    color: rgba(59, 146, 219, 0.72);
+}
+
+.spotlight-status-label {
+    color: rgba(26, 38, 52, 0.54);
+    font-size: 15px;
+    font-weight: 400;
+}
+
+.spotlight-results-scroll StScrollBar {
+    min-width: 8px;
+    margin: 6px 2px 6px 0;
+}
+
+.spotlight-results-scroll StScrollBar .vhandle,
+.spotlight-results-scroll StScrollBar .v-handle {
+    min-width: 6px;
+    border: none;
+    border-radius: 999px;
+    background-color: rgba(30, 51, 70, 0.16);
+}
+
+.spotlight-results-scroll StScrollBar .vhandle:hover,
+.spotlight-results-scroll StScrollBar .v-handle:hover {
+    background-color: rgba(30, 51, 70, 0.24);
+}
+
+/* ---------------------------------------------------------------------
+ * 4. Result rows
+ * --------------------------------------------------------------------- */
 
 .spotlight-result-row {
-    border-radius: 12px;
-    padding: 7px 10px;
-
-    background-color: transparent;
+    /* St adds padding and border outside min-height: 46 + 16 + 2 = 64. */
+    min-height: 46px;
+    padding: 8px 12px 8px 9px;
+    spacing: 12px;
     border: 1px solid transparent;
-    transition: none;
+    border-radius: 12px;
+    background-color: transparent;
+    color: rgba(20, 28, 39, 0.93);
+    transition-duration: 150ms;
 }
 
-.spotlight-result-row.selected {
-    background-color: rgba(0, 0, 0, 0.08);
-    border: 1px solid transparent;
+.spotlight-result-row:hover {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+
+.spotlight-result-row:active {
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+.spotlight-result-row-content,
+.spotlight-answer-content,
+.spotlight-weather-content {
+    spacing: 12px;
 }
 
 .spotlight-result-row.inactive-selection {
-    background-color: rgba(0, 0, 0, 0.04);
-    border: 1px solid transparent;
+    background-color: rgba(71, 153, 225, 0.14);
+}
+
+.spotlight-result-row.selected,
+.spotlight-result-row.selected:hover,
+.spotlight-result-row:focus {
+    background-color: rgba(71, 153, 225, 0.25);
+}
+
+.spotlight-result-icon-tile {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background-color: rgba(69, 130, 190, 0.88);
+    color: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 3px 10px rgba(13, 44, 71, 0.09);
 }
 
 .spotlight-result-icon {
-    margin-right: 10px;
+    icon-size: 24px;
+    color: rgba(255, 255, 255, 0.98);
 }
 
-.spotlight-result-label {
-    font-size: 15px;
-    font-weight: 500;
+.spotlight-result-row.result-app .spotlight-result-icon-tile {
+    background-color: rgba(27, 132, 232, 0.92);
+}
+
+.spotlight-result-row.result-window .spotlight-result-icon-tile {
+    background-color: rgba(35, 146, 175, 0.92);
+}
+
+.spotlight-result-row.result-file .spotlight-result-icon-tile {
+    background-color: rgba(65, 137, 215, 0.92);
+}
+
+.spotlight-result-row.result-web .spotlight-result-icon-tile {
+    background-color: rgba(64, 119, 185, 0.92);
+}
+
+.spotlight-result-row.result-clipboard .spotlight-result-icon-tile {
+    background-color: rgba(113, 86, 205, 0.92);
+}
+
+.spotlight-result-row.result-system .spotlight-result-icon-tile {
+    background-color: rgba(91, 112, 133, 0.92);
 }
 
 .spotlight-result-text {
-    spacing: 1px;
+    spacing: 2px;
+}
+
+.spotlight-result-label {
+    color: rgba(20, 28, 39, 0.93);
+    font-size: 16px;
+    font-weight: 500;
 }
 
 .spotlight-result-subtitle {
-    font-size: 11px;
+    color: rgba(26, 38, 52, 0.54);
+    font-size: 13px;
     font-weight: 400;
-    color: rgba(0, 0, 0, 0.48);
 }
 
-/* --- Prominent Answer Style --- */
+.spotlight-result-metadata {
+    margin-left: 14px;
+    color: rgba(26, 38, 52, 0.38);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------
+ * 5. Calculator answer and weather cards
+ * --------------------------------------------------------------------- */
+
 .spotlight-result-row.answer {
-    padding: 12px 10px;
+    min-height: 60px;
+    margin: 4px 2px;
+    padding: 16px 18px;
+    border-radius: 15px;
+    background-color: rgba(255, 255, 255, 0.11);
+}
+
+.spotlight-result-row.answer:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.spotlight-result-row.answer.selected,
+.spotlight-result-row.answer:focus {
+    background-color: rgba(71, 153, 225, 0.18);
+}
+
+.spotlight-answer-context {
+    color: rgba(26, 38, 52, 0.54);
+    font-size: 13px;
+    font-weight: 400;
 }
 
 .spotlight-result-row.answer .spotlight-result-label {
-    font-size: 22pt;
-    font-weight: 500;
-    color: #007aff;
+    color: rgba(20, 28, 39, 0.93);
+    font-size: 32px;
+    font-weight: 400;
 }
 
-.spotlight-result-row.answer .spotlight-result-icon {
-    icon-size: 32px;
+.spotlight-result-row.answer .spotlight-result-subtitle {
+    color: rgba(26, 38, 52, 0.38);
+    font-size: 12px;
 }
-
-/* =====================================================================
- * 3. DARK MODE OVERRIDES
- * ===================================================================== */
-
-.dark-mode.spotlight-container {
-    color: rgba(255, 255, 255, 0.95);
-    background-color: rgba(30, 30, 30, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0px 24px 48px rgba(0, 0, 0, 0.4);
-}
-
-.dark-mode .spotlight-entry {
-    color: rgba(255, 255, 255, 0.95);
-}
-
-.dark-mode .spotlight-icon {
-    color: rgba(255, 255, 255, 0.6);
-}
-
-.dark-mode .spotlight-entry:selected {
-    background-color: rgba(0, 122, 255, 0.4);
-    color: white;
-}
-
-.dark-mode .spotlight-entry StLabel.hint-text {
-    color: rgba(255, 255, 255, 0.38);
-}
-
-.dark-mode .spotlight-result-subtitle {
-    color: rgba(255, 255, 255, 0.48);
-}
-
-.dark-mode .spotlight-result-row.inactive-selection {
-    background-color: rgba(255, 255, 255, 0.06);
-    border: 1px solid transparent;
-}
-
-.dark-mode .spotlight-result-row.selected {
-    background-color: rgba(255, 255, 255, 0.12);
-    border: 1px solid transparent;
-}
-
-.dark-mode .spotlight-result-row.answer .spotlight-result-label {
-    color: #58a6ff;
-}
-
-/* =====================================================================
- * 4. WEATHER CARD
- * ===================================================================== */
 
 .spotlight-result-row.weather-card {
-    padding: 12px 10px;
+    min-height: 50px;
+    margin: 4px 2px;
+    padding: 12px 14px;
+    border-radius: 16px;
+    background-color: rgba(255, 255, 255, 0.11);
 }
 
-.weather-card-icon {
-    icon-size: 40px;
-    margin-right: 12px;
+.spotlight-result-row.weather-card:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.spotlight-result-row.weather-card.selected,
+.spotlight-result-row.weather-card:focus {
+    background-color: rgba(71, 153, 225, 0.18);
+}
+
+.weather-icon-tile {
+    background-color: rgba(47, 142, 216, 0.92);
 }
 
 .weather-temp {
-    font-size: 28pt;
+    margin-left: 14px;
+    color: rgba(20, 28, 39, 0.93);
+    font-size: 34px;
     font-weight: 300;
-    margin-right: 14px;
 }
 
 .weather-desc {
-    font-size: 14px;
-    font-weight: 500;
+    color: rgba(26, 38, 52, 0.54);
+    font-size: 13px;
+    font-weight: 400;
 }
 
 .weather-city {
-    font-size: 12px;
-    color: rgba(0, 0, 0, 0.5);
+    color: rgba(20, 28, 39, 0.93);
+    font-size: 16px;
+    font-weight: 500;
 }
 
 .weather-details {
-    font-size: 12px;
-    color: rgba(0, 0, 0, 0.5);
-    margin-top: 8px;
+    margin-top: 3px;
+    color: rgba(26, 38, 52, 0.54);
+    font-size: 13px;
+    font-weight: 400;
 }
 
-.dark-mode .weather-city,
-.dark-mode .weather-details {
-    color: rgba(255, 255, 255, 0.45);
+/* ---------------------------------------------------------------------
+ * 6. Compact keyboard footer
+ * --------------------------------------------------------------------- */
+
+.spotlight-footer {
+    /* 21px content plus 13px vertical padding yields the 34px footer. */
+    min-height: 21px;
+    padding: 6px 14px 7px;
+    spacing: 18px;
+    color: rgba(27, 40, 55, 0.36);
 }
 
-/* =====================================================================
- * 5. SCROLLBAR REFINEMENTS
- * ===================================================================== */
-
-.spotlight-results-scroll StScrollBar {
-    margin-right: 8px;
-    margin-top: 4px;
-    margin-bottom: 24px;
+.spotlight-actions-hint {
+    spacing: 6px;
+    color: rgba(26, 40, 56, 0.47);
 }
 
-.spotlight-results-scroll StScrollBar .v-handle {
-    background-color: rgba(0, 0, 0, 0.2);
-    border-radius: 6px;
-    min-width: 6px;
-    border: none;
+.spotlight-footer-key {
+    min-width: 8px;
+    min-height: 16px;
+    padding: 0 5px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 5px;
+    background-color: rgba(255, 255, 255, 0.19);
+    color: rgba(20, 32, 47, 0.50);
+    font-size: 11px;
+    font-weight: 500;
 }
 
+.spotlight-actions-hint .spotlight-footer-key {
+    min-width: 12px;
+    border-color: rgba(74, 158, 226, 0.10);
+    background-color: rgba(74, 158, 226, 0.09);
+    color: rgba(20, 72, 120, 0.66);
+}
+
+.spotlight-footer-label {
+    color: rgba(27, 40, 55, 0.36);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.spotlight-footer-hints {
+    spacing: 16px;
+}
+
+.spotlight-footer-hint {
+    spacing: 4px;
+}
+
+/* ---------------------------------------------------------------------
+ * 7. Dark glass variant
+ * --------------------------------------------------------------------- */
+
+.dark-mode.spotlight-container {
+    color: rgba(248, 251, 255, 0.94);
+}
+
+.dark-mode .spotlight-blur-surface {
+    background-color: rgba(0, 0, 0, 0.01);
+}
+
+.dark-mode .spotlight-material {
+    background-color: rgba(15, 27, 39, 0.34);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
+}
+
+.dark-mode .spotlight-highlight {
+    background-gradient-start: rgba(255, 255, 255, 0.045);
+    background-gradient-end: rgba(255, 255, 255, 0.0);
+}
+
+.dark-mode.no-background-blur .spotlight-material {
+    background-color: rgba(15, 27, 39, 0.76);
+}
+
+.dark-mode .spotlight-icon {
+    color: rgba(247, 250, 255, 0.61);
+}
+
+.dark-mode .spotlight-entry,
+.dark-mode .spotlight-entry:focus {
+    color: rgba(248, 251, 255, 0.94);
+    selection-background-color: rgba(62, 142, 213, 0.32);
+    selected-color: rgba(255, 255, 255, 0.98);
+}
+
+.dark-mode .spotlight-entry StLabel.hint-text {
+    color: rgba(239, 245, 252, 0.35);
+}
+
+.dark-mode .spotlight-mode-indicator {
+    background-color: rgba(255, 255, 255, 0.07);
+}
+
+.dark-mode .spotlight-mode-inner {
+    background-color: rgba(255, 255, 255, 0.09);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.13);
+}
+
+.dark-mode .spotlight-mode-label {
+    color: rgba(235, 243, 252, 0.66);
+}
+
+.dark-mode .spotlight-divider {
+    background-color: rgba(255, 255, 255, 0.09);
+}
+
+.dark-mode .spotlight-status,
+.dark-mode .spotlight-status-label {
+    color: rgba(232, 241, 251, 0.55);
+}
+
+.dark-mode .spotlight-status-icon {
+    color: rgba(105, 186, 246, 0.78);
+}
+
+.dark-mode .spotlight-results-scroll StScrollBar .vhandle,
 .dark-mode .spotlight-results-scroll StScrollBar .v-handle {
-    background-color: rgba(255, 255, 255, 0.25);
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+.dark-mode .spotlight-results-scroll StScrollBar .vhandle:hover,
+.dark-mode .spotlight-results-scroll StScrollBar .v-handle:hover {
+    background-color: rgba(255, 255, 255, 0.22);
+}
+
+.dark-mode .spotlight-result-row {
+    color: rgba(248, 251, 255, 0.94);
+}
+
+.dark-mode .spotlight-result-row:hover {
+    background-color: rgba(255, 255, 255, 0.055);
+}
+
+.dark-mode .spotlight-result-row:active {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark-mode .spotlight-result-row.inactive-selection {
+    background-color: rgba(62, 142, 213, 0.14);
+}
+
+.dark-mode .spotlight-result-row.selected,
+.dark-mode .spotlight-result-row.selected:hover,
+.dark-mode .spotlight-result-row:focus {
+    background-color: rgba(62, 142, 213, 0.25);
+}
+
+.dark-mode .spotlight-result-label,
+.dark-mode .spotlight-result-row.answer .spotlight-result-label,
+.dark-mode .weather-temp,
+.dark-mode .weather-city {
+    color: rgba(248, 251, 255, 0.94);
+}
+
+.dark-mode .spotlight-result-subtitle,
+.dark-mode .spotlight-answer-context,
+.dark-mode .weather-desc,
+.dark-mode .weather-details {
+    color: rgba(232, 241, 251, 0.55);
+}
+
+.dark-mode .spotlight-result-metadata,
+.dark-mode .spotlight-result-row.answer .spotlight-result-subtitle {
+    color: rgba(232, 241, 251, 0.37);
+}
+
+.dark-mode .spotlight-result-row.answer,
+.dark-mode .spotlight-result-row.weather-card {
+    background-color: rgba(255, 255, 255, 0.055);
+}
+
+.dark-mode .spotlight-result-row.answer:hover,
+.dark-mode .spotlight-result-row.weather-card:hover {
+    background-color: rgba(255, 255, 255, 0.075);
+}
+
+.dark-mode .spotlight-result-row.answer.selected,
+.dark-mode .spotlight-result-row.answer:focus,
+.dark-mode .spotlight-result-row.weather-card.selected,
+.dark-mode .spotlight-result-row.weather-card:focus {
+    background-color: rgba(62, 142, 213, 0.18);
+}
+
+.dark-mode .spotlight-footer {
+    color: rgba(235, 243, 252, 0.36);
+}
+
+.dark-mode .spotlight-actions-hint {
+    color: rgba(235, 243, 252, 0.54);
+}
+
+.dark-mode .spotlight-footer-label {
+    color: rgba(235, 243, 252, 0.40);
+}
+
+.dark-mode .spotlight-footer-key {
+    border-color: rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.06);
+    color: rgba(245, 250, 255, 0.58);
+}
+
+.dark-mode .spotlight-actions-hint .spotlight-footer-key {
+    border-color: rgba(115, 194, 249, 0.10);
+    background-color: rgba(78, 168, 235, 0.10);
+    color: rgba(139, 205, 255, 0.76);
 }
