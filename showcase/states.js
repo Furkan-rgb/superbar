@@ -69,6 +69,37 @@ globalThis.SUPERBAR_SHOWCASE_STATES = {
       },
     ],
   },
+  "dark-bottom-search": {
+    theme: "dark",
+    position: "bottom",
+    label: "Bottom-positioned results",
+    query: "files",
+    mode: "All results",
+    rows: [
+      {
+        type: "app",
+        icon: "folder",
+        title: "Files",
+        subtitle: "Access and organize files",
+        metadata: "Application",
+        selected: true,
+      },
+      {
+        type: "file",
+        icon: "download",
+        title: "Downloads",
+        subtitle: "Folder",
+        metadata: "File",
+      },
+      {
+        type: "web",
+        icon: "globe",
+        title: "Search the web for “files”",
+        subtitle: "Open in your default browser",
+        metadata: "Web",
+      },
+    ],
+  },
   "light-clipboard": {
     theme: "light",
     label: "Clipboard history",

@@ -22,6 +22,9 @@ const RESULTS_MAX_HEIGHT_FRACTION = 0.52;
 const OPEN_ANIMATION_MS = 250;
 const OPEN_TRANSLATION_Y = -10;
 const OPEN_SCALE = 0.985;
+const SEARCH_ROW_HEIGHT = 64;
+const TOP_POSITION_FRACTION = 0.12;
+const CENTER_POSITION_FRACTION = 0.22;
 const SURFACE_COLORS = {
   light: [245, 245, 244],
   dark: [23, 23, 23],
@@ -487,6 +490,15 @@ export default class SearchBar extends Extension {
     this._resultsClip.add_child(this._resultsScroll);
     this._resultsScroll.height = 0;
     this._resultsClip.height = 0;
+    this._resultsClip.connectObject(
+      "notify::height",
+      () => {
+        if (this._settings?.get_string("bar-position") === "bottom") {
+          this._repositionContainer();
+        }
+      },
+      this,
+    );
     this._contentLayer.add_child(this._resultsClip);
 
     this._footerDivider = new St.Widget({
@@ -715,6 +727,7 @@ export default class SearchBar extends Extension {
     this._destroyClickShield();
 
     this._resultsClip?.remove_all_transitions();
+    this._resultsClip?.disconnectObject(this);
     if (this._resultsBox) this._clearResults();
 
     if (this._container) {
@@ -752,6 +765,7 @@ export default class SearchBar extends Extension {
     this._openHint = null;
     this._closeHint = null;
     this._contentLayer = null;
+    this._resultsExpandUpward = null;
     this._highlightLayer = null;
     this._materialLayer = null;
     this._settings = null;
@@ -3107,6 +3121,38 @@ export default class SearchBar extends Extension {
 
   // --- Layout ---
 
+  _updateContentDirection(positionKey) {
+    const expandUpward = positionKey === "bottom";
+    if (
+      this._resultsExpandUpward === expandUpward ||
+      !this._contentLayer
+    ) {
+      return;
+    }
+
+    const children = expandUpward
+      ? [
+          this._resultsClip,
+          this._footerDivider,
+          this._footer,
+          this._headerDivider,
+          this._inputRow,
+        ]
+      : [
+          this._inputRow,
+          this._headerDivider,
+          this._resultsClip,
+          this._footerDivider,
+          this._footer,
+        ];
+
+    children.forEach((child, index) => {
+      this._contentLayer.set_child_at_index(child, index);
+    });
+    this._resultsExpandUpward = expandUpward;
+    this._contentLayer.queue_relayout();
+  }
+
   _isValidMonitorIndex(index, monitors = Main.layoutManager.monitors ?? []) {
     return (
       Number.isInteger(index) && index >= 0 && index < monitors.length
@@ -3177,8 +3223,13 @@ export default class SearchBar extends Extension {
     );
     const containerWidth = Math.min(configuredWidth, availableWidth);
     const positionKey = this._settings.get_string("bar-position");
-    const fractionMap = { top: 0.12, center: 0.22, bottom: 0.58 };
+    const fractionMap = {
+      top: TOP_POSITION_FRACTION,
+      center: CENTER_POSITION_FRACTION,
+    };
     const fraction = fractionMap[positionKey] ?? fractionMap.center;
+
+    this._updateContentDirection(positionKey);
 
     this._container.set_size(containerWidth, -1);
     this._applyResponsiveVisibility(containerWidth);
@@ -3193,7 +3244,18 @@ export default class SearchBar extends Extension {
         containerHeight -
         MONITOR_EDGE_MARGIN,
     );
-    const preferredY = workArea.y + Math.floor(workArea.height * fraction);
+    const inputAnchorY =
+      positionKey === "bottom"
+        ? workArea.y +
+          workArea.height -
+          Math.floor(workArea.height * TOP_POSITION_FRACTION) -
+          SEARCH_ROW_HEIGHT
+        : workArea.y + Math.floor(workArea.height * fraction);
+    const upwardContentHeight =
+      positionKey === "bottom"
+        ? Math.max(0, containerHeight - SEARCH_ROW_HEIGHT)
+        : 0;
+    const preferredY = inputAnchorY - upwardContentHeight;
     const y = Math.max(minimumY, Math.min(maximumY, preferredY));
     const x =
       workArea.x + Math.floor((workArea.width - containerWidth) / 2);

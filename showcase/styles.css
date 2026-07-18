@@ -119,6 +119,10 @@ body[data-theme="dark"] .desktop {
   box-shadow: var(--shadow);
 }
 
+.superbar.bottom-position {
+  margin-top: 250px;
+}
+
 .search-row {
   display: flex;
   align-items: center;
@@ -459,4 +463,9 @@ body[data-theme="dark"] .actions-hint kbd {
 body[data-theme="light"] .render-label {
   color: rgba(28, 28, 28, 0.5);
   text-shadow: 0 1px 1px rgba(255, 255, 255, 0.34);
+}
+
+.superbar.bottom-position + .render-label {
+  top: 18px;
+  bottom: auto;
 }

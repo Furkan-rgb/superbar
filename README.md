@@ -108,12 +108,12 @@ node scripts/render-showcase.mjs --scale 4 --state dark-weather
 node scripts/render-showcase.mjs --list
 ```
 
-The rendered states include empty search, general results, clipboard copy and
-copied states, calculator output, and weather. Set `SUPERBAR_CHROME` to the
-Chrome or Chromium executable if it is installed outside the common system
-locations. The renderer is an illustration of the GNOME Shell UI rather than a
-live Shell capture; when the extension's design tokens change, update
-`showcase/styles.css` alongside `stylesheet.css`.
+The rendered states include empty search, general results, bottom-positioned
+results, clipboard copy and copied states, calculator output, and weather. Set
+`SUPERBAR_CHROME` to the Chrome or Chromium executable if it is installed
+outside the common system locations. The renderer is an illustration of the
+GNOME Shell UI rather than a live Shell capture; when the extension's design
+tokens change, update `showcase/styles.css` alongside `stylesheet.css`.
 
 For development, close any existing nested Shell and run `make nested`. This
 packages and installs the current source before starting a fresh Shell process;
@@ -139,6 +139,11 @@ soft neutral off-white light surface and charcoal dark surface keep text, icons,
 and results readable without GNOME Shell's rectangular background blur.
 Background opacity is adjustable from 65–100% in Appearance settings and
 defaults to 90%.
+
+When Vertical Position is set to Bottom, the search row remains anchored at its
+configured screen position while the result panel reveals upward. This keeps
+the launcher clear of the lower screen edge and makes the expansion direction
+match its placement.
 
 Ordinary searches remain one unified, adaptively ranked list; the redesign does
 not add category tabs or source filters. The non-interactive mode indicator is

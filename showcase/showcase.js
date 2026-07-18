@@ -93,6 +93,23 @@
     .join("");
   document.querySelector(".render-label").textContent = `Superbar · ${state.label}`;
 
+  if (state.position === "bottom") {
+    const superbar = document.querySelector(".superbar");
+    const searchRow = document.querySelector(".search-row");
+    const resultsDivider = document.querySelector(".results-divider");
+    const results = document.querySelector(".results");
+    const footerDivider = document.querySelector(".footer-divider");
+    const footer = document.querySelector(".footer");
+    superbar.classList.add("bottom-position");
+    superbar.append(
+      results,
+      footerDivider,
+      footer,
+      resultsDivider,
+      searchRow,
+    );
+  }
+
   const hasResults = state.rows.length > 0;
   document.querySelector(".results-divider").hidden = !hasResults;
   document.querySelector(".results").hidden = !hasResults;
