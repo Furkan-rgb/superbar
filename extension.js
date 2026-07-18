@@ -15,6 +15,7 @@ import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import * as SystemActions from "resource:///org/gnome/shell/misc/systemActions.js";
 import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
+import { getSurfaceColor } from "./appearance.js";
 
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
@@ -27,10 +28,6 @@ const OPEN_TRANSLATION_Y = -10;
 const OPEN_SCALE = 0.985;
 const TOP_POSITION_FRACTION = 0.12;
 const CENTER_POSITION_FRACTION = 0.22;
-const SURFACE_COLORS = {
-  light: [245, 245, 244],
-  dark: [23, 23, 23],
-};
 const STRONG_LOCAL_MATCH_SCORE = 600;
 // Local results below this relevance score are hidden entirely (only the web
 // search remains). Substring/word/prefix matches clear it; scattered
@@ -372,11 +369,6 @@ export default class SearchBar extends Extension {
       x_expand: true,
       y_expand: true,
     });
-    this._highlightLayer = new St.Widget({
-      style_class: "spotlight-highlight",
-      x_expand: true,
-      y_expand: true,
-    });
     this._contentLayer = new St.BoxLayout({
       style_class: "spotlight-content",
       vertical: true,
@@ -385,7 +377,6 @@ export default class SearchBar extends Extension {
     });
 
     this._container.add_child(this._materialLayer);
-    this._container.add_child(this._highlightLayer);
     this._container.add_child(this._contentLayer);
 
     this._inputRow = new St.BoxLayout({
@@ -677,6 +668,10 @@ export default class SearchBar extends Extension {
       () => this._repositionContainer(),
       "changed::theme-mode",
       () => this._updateTheme(),
+      "changed::light-color-preset",
+      () => this._updateTheme(),
+      "changed::dark-color-preset",
+      () => this._updateTheme(),
       "changed::background-opacity",
       () => this._updateTheme(),
       "changed::clipboard-monitor-enabled",
@@ -768,7 +763,6 @@ export default class SearchBar extends Extension {
     this._closeHint = null;
     this._contentLayer = null;
     this._resultsExpandUpward = null;
-    this._highlightLayer = null;
     this._materialLayer = null;
     this._settings = null;
     this._appSystem = null;
@@ -3330,7 +3324,10 @@ export default class SearchBar extends Extension {
       1,
       Math.max(0.65, this._settings.get_int("background-opacity") / 100),
     );
-    const [red, green, blue] = SURFACE_COLORS[styleVariant];
+    const presetKey = this._settings.get_string(
+      `${styleVariant}-color-preset`,
+    );
+    const [red, green, blue] = getSurfaceColor(styleVariant, presetKey);
     this._materialLayer.set_style(
       `background-color: rgba(${red}, ${green}, ${blue}, ${opacity});`,
     );

@@ -37,6 +37,7 @@ check: syntax schema
 syntax:
 	@node --input-type=module --check < extension.js
 	@node --input-type=module --check < prefs.js
+	@node --input-type=module --check < appearance.js
 	@printf "JavaScript syntax is valid.\n"
 
 schema:
@@ -55,7 +56,7 @@ lint:
 			--rule 'no-unused-vars:error' \
 			--rule 'no-dupe-keys:error' \
 			--rule 'no-unreachable:error' \
-			extension.js prefs.js; \
+			extension.js prefs.js appearance.js; \
 		printf "ESLint checks passed.\n"; \
 	else \
 		printf "ESLint is not installed; skipping optional lint checks.\n"; \
@@ -63,7 +64,8 @@ lint:
 
 pack: check
 	@mkdir -p "$(BUILD_DIR)"
-	@gnome-extensions pack --force --out-dir="$(BUILD_DIR)" --extra-source=LICENSE .
+	@gnome-extensions pack --force --out-dir="$(BUILD_DIR)" \
+		--extra-source=LICENSE --extra-source=appearance.js .
 	@printf "Built %s\n" "$(BUILD_ARCHIVE)"
 
 verify: pack

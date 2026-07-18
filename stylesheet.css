@@ -15,7 +15,6 @@
 }
 
 .spotlight-material,
-.spotlight-highlight,
 .spotlight-content {
     border-radius: 28px;
 }
@@ -24,12 +23,6 @@
     background-color: rgba(245, 245, 244, 0.90);
     border: 1px solid rgba(255, 255, 255, 0.72);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
-}
-
-.spotlight-highlight {
-    background-gradient-direction: vertical;
-    background-gradient-start: rgba(255, 255, 255, 0.075);
-    background-gradient-end: rgba(255, 255, 255, 0.0);
 }
 
 .spotlight-content {
@@ -431,11 +424,6 @@
     background-color: rgba(23, 23, 23, 0.90);
     border-color: rgba(255, 255, 255, 0.11);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
-}
-
-.dark-mode .spotlight-highlight {
-    background-gradient-start: rgba(255, 255, 255, 0.045);
-    background-gradient-end: rgba(255, 255, 255, 0.0);
 }
 
 .dark-mode .spotlight-icon {

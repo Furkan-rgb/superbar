@@ -8,6 +8,22 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import GObject from "gi://GObject";
 import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js";
+import { SURFACE_COLOR_PRESETS } from "./appearance.js";
+
+function addComboSettingRow(group, settings, key, title, subtitle, options) {
+  const optionKeys = options.map((option) => option.key);
+  const row = new Adw.ComboRow({
+    title,
+    subtitle,
+    model: Gtk.StringList.new(options.map((option) => option.label)),
+  });
+  const currentIndex = optionKeys.indexOf(settings.get_string(key));
+  row.set_selected(currentIndex >= 0 ? currentIndex : 0);
+  row.connect("notify::selected", () => {
+    settings.set_string(key, optionKeys[row.selected] ?? optionKeys[0]);
+  });
+  group.add(row);
+}
 
 // ── Keybinding row ──────────────────────────────────────────────────────────
 
@@ -283,7 +299,7 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     // ── Appearance group ───────────────────────────────────────────────────
     const appearanceGroup = new Adw.PreferencesGroup({
       title: "Appearance",
-      description: "Adjust the size and position of the bar",
+      description: "Adjust the colors, size, and position of the bar",
     });
     shortcutPage.add(appearanceGroup);
 
@@ -306,23 +322,36 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     );
     appearanceGroup.add(maxResultsRow);
 
-    const themeLabels = ["System", "Light", "Dark"];
-    const themeKeys = ["system", "light", "dark"];
-    const themeRow = new Adw.ComboRow({
-      title: "Color Theme",
-      subtitle: "Follow GNOME Shell or use a fixed light or dark style",
-      model: Gtk.StringList.new(themeLabels),
-    });
-    const currentTheme = settings.get_string("theme-mode");
-    const currentThemeIndex = themeKeys.indexOf(currentTheme);
-    themeRow.set_selected(currentThemeIndex >= 0 ? currentThemeIndex : 0);
-    themeRow.connect("notify::selected", () => {
-      settings.set_string(
-        "theme-mode",
-        themeKeys[themeRow.selected] ?? "system",
-      );
-    });
-    appearanceGroup.add(themeRow);
+    addComboSettingRow(
+      appearanceGroup,
+      settings,
+      "theme-mode",
+      "Color Theme",
+      "Follow GNOME Shell or use a fixed light or dark style",
+      [
+        { key: "system", label: "System" },
+        { key: "light", label: "Light" },
+        { key: "dark", label: "Dark" },
+      ],
+    );
+
+    addComboSettingRow(
+      appearanceGroup,
+      settings,
+      "light-color-preset",
+      "Light Background",
+      "Background color used in light mode",
+      SURFACE_COLOR_PRESETS.light,
+    );
+
+    addComboSettingRow(
+      appearanceGroup,
+      settings,
+      "dark-color-preset",
+      "Dark Background",
+      "Background color used in dark mode",
+      SURFACE_COLOR_PRESETS.dark,
+    );
 
     const backgroundOpacityRow = new Adw.SpinRow({
       title: "Background Opacity",

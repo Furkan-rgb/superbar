@@ -58,6 +58,16 @@ Copyright (C) 2026 Furkan
       <summary>Color Theme</summary>
       <description>Color theme for Superbar: system, light, or dark.</description>
     </key>
+    <key name="light-color-preset" type="s">
+      <default>'neutral'</default>
+      <summary>Light Background Color</summary>
+      <description>Named background color preset used when Superbar is in light mode.</description>
+    </key>
+    <key name="dark-color-preset" type="s">
+      <default>'neutral'</default>
+      <summary>Dark Background Color</summary>
+      <description>Named background color preset used when Superbar is in dark mode.</description>
+    </key>
     <key name="background-opacity" type="i">
       <default>90</default>
       <range min="65" max="100"/>

@@ -41,7 +41,7 @@ HTML/CSS so the README stays aligned with the extension UI.
 | **Adaptive Ranking**      | Prioritizes strong matches, active context, and selected apps/actions  |
 | **Multi-Monitor Aware**   | Opens on the focused monitor and stays inside its usable work area     |
 | **Configurable Shortcut** | Change the toggle keybinding in GNOME Extensions preferences           |
-| **Adjustable Appearance** | Choose the theme, background opacity, width, and screen position       |
+| **Adjustable Appearance** | Choose light and dark color presets, opacity, width, and screen position |
 
 ---
 
@@ -139,7 +139,9 @@ Wayland session, log out and back in instead of restarting GNOME Shell in place.
 Superbar uses a restrained, high-contrast material adapted to GNOME Shell. Its
 soft neutral off-white light surface and charcoal dark surface keep text, icons,
 and results readable without GNOME Shell's rectangular background blur.
-Background opacity is adjustable from 65–100% in Appearance settings and
+The current neutral surfaces remain the defaults, with additional light and
+dark background presets available independently in Appearance settings.
+Background opacity is adjustable from 65–100% and
 defaults to 90%.
 
 When Vertical Position is set to Bottom, the search row remains anchored at its
