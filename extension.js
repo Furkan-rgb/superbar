@@ -22,7 +22,6 @@ const RESULTS_MAX_HEIGHT_FRACTION = 0.52;
 const OPEN_ANIMATION_MS = 250;
 const OPEN_TRANSLATION_Y = -10;
 const OPEN_SCALE = 0.985;
-const SEARCH_ROW_HEIGHT = 64;
 const TOP_POSITION_FRACTION = 0.12;
 const CENTER_POSITION_FRACTION = 0.22;
 const SURFACE_COLORS = {
@@ -2595,7 +2594,7 @@ export default class SearchBar extends Extension {
     }
 
     this._resultsState = "rows";
-    this._footerDivider.show();
+    this._updateDividerVisibility();
     this._results = results;
     this._selectedIndex = selectedResult
       ? results.findIndex((result) =>
@@ -2873,7 +2872,7 @@ export default class SearchBar extends Extension {
   _showStatus(kind, message) {
     this._clearResults();
     this._resultsState = kind;
-    this._footerDivider.show();
+    this._updateDividerVisibility();
     this._statusBox.remove_style_class_name("empty");
     this._statusBox.remove_style_class_name("loading");
     this._statusBox.remove_style_class_name("error");
@@ -2888,7 +2887,7 @@ export default class SearchBar extends Extension {
   _hideResults() {
     this._clearResults();
     this._resultsState = "hidden";
-    this._footerDivider.hide();
+    this._updateDividerVisibility();
     this._setResultsHeight(0);
   }
 
@@ -3068,8 +3067,10 @@ export default class SearchBar extends Extension {
     );
     const [, naturalHeight] =
       this._resultsBox.get_preferred_height(preferredWidth);
+    const minimumHeight =
+      this._resultsState === "rows" ? 0 : RESULTS_MIN_HEIGHT;
     const height = Math.min(
-      Math.max(RESULTS_MIN_HEIGHT, naturalHeight),
+      Math.max(minimumHeight, naturalHeight),
       this._getResultsMaxHeight(),
     );
     this._setResultsHeight(height, animate);
@@ -3121,6 +3122,24 @@ export default class SearchBar extends Extension {
 
   // --- Layout ---
 
+  _updateDividerVisibility() {
+    if (!this._headerDivider || !this._footerDivider) return;
+
+    if (this._resultsState !== "hidden") {
+      this._headerDivider.show();
+      this._footerDivider.show();
+      return;
+    }
+
+    if (this._settings?.get_string("bar-position") === "bottom") {
+      this._headerDivider.hide();
+      this._footerDivider.show();
+    } else {
+      this._headerDivider.show();
+      this._footerDivider.hide();
+    }
+  }
+
   _updateContentDirection(positionKey) {
     const expandUpward = positionKey === "bottom";
     if (
@@ -3133,10 +3152,10 @@ export default class SearchBar extends Extension {
     const children = expandUpward
       ? [
           this._resultsClip,
-          this._footerDivider,
-          this._footer,
           this._headerDivider,
           this._inputRow,
+          this._footerDivider,
+          this._footer,
         ]
       : [
           this._inputRow,
@@ -3150,6 +3169,7 @@ export default class SearchBar extends Extension {
       this._contentLayer.set_child_at_index(child, index);
     });
     this._resultsExpandUpward = expandUpward;
+    this._updateDividerVisibility();
     this._contentLayer.queue_relayout();
   }
 
@@ -3244,18 +3264,13 @@ export default class SearchBar extends Extension {
         containerHeight -
         MONITOR_EDGE_MARGIN,
     );
-    const inputAnchorY =
+    const preferredY =
       positionKey === "bottom"
         ? workArea.y +
           workArea.height -
           Math.floor(workArea.height * TOP_POSITION_FRACTION) -
-          SEARCH_ROW_HEIGHT
+          containerHeight
         : workArea.y + Math.floor(workArea.height * fraction);
-    const upwardContentHeight =
-      positionKey === "bottom"
-        ? Math.max(0, containerHeight - SEARCH_ROW_HEIGHT)
-        : 0;
-    const preferredY = inputAnchorY - upwardContentHeight;
     const y = Math.max(minimumY, Math.min(maximumY, preferredY));
     const x =
       workArea.x + Math.floor((workArea.width - containerWidth) / 2);

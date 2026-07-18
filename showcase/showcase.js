@@ -103,17 +103,19 @@
     superbar.classList.add("bottom-position");
     superbar.append(
       results,
-      footerDivider,
-      footer,
       resultsDivider,
       searchRow,
+      footerDivider,
+      footer,
     );
   }
 
   const hasResults = state.rows.length > 0;
-  document.querySelector(".results-divider").hidden = !hasResults;
+  document.querySelector(".results-divider").hidden =
+    !hasResults && state.position === "bottom";
   document.querySelector(".results").hidden = !hasResults;
-  document.querySelector(".footer-divider").hidden = !hasResults;
+  document.querySelector(".footer-divider").hidden =
+    !hasResults && state.position !== "bottom";
   document.querySelector(".footer").hidden = !hasResults;
 
   document.fonts.ready.then(() => {

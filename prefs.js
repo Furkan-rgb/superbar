@@ -365,7 +365,7 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     );
     appearanceGroup.add(barWidthRow);
 
-    const positionLabels = ["Top (¼ from top)", "Center", "Bottom"];
+    const positionLabels = ["Top", "Center", "Bottom"];
     const positionKeys = ["top", "center", "bottom"];
     const positionRow = new Adw.ComboRow({
       title: "Vertical Position",
