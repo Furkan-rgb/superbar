@@ -38,6 +38,7 @@ Open it from anywhere with **Alt+Space**.
 | **Adaptive Ranking**      | Prioritizes strong matches, active context, and selected apps/actions  |
 | **Multi-Monitor Aware**   | Opens on the focused monitor and stays inside its usable work area     |
 | **Configurable Shortcut** | Change the toggle keybinding in GNOME Extensions preferences           |
+| **Adjustable Appearance** | Choose the theme, background opacity, width, and screen position       |
 
 ---
 
@@ -105,12 +106,10 @@ Wayland session, log out and back in instead of restarting GNOME Shell in place.
 
 ## Design and implementation notes
 
-Superbar uses a restrained Liquid Glass-inspired material adapted to GNOME
-Shell rather than attempting an exact recreation of macOS. The panel separates
-its bounded background-blur layer from its tint and foreground-content layers,
-so only the desktop directly behind Superbar is blurred while text, icons, and
-results remain crisp. If `Shell.BlurEffect` is unavailable, Superbar falls back
-to the translucent tint, border, and shadow without disabling search.
+Superbar uses a restrained, high-contrast material adapted to GNOME Shell. Its
+light surface and neutral charcoal dark surface keep text, icons, and results
+readable without GNOME Shell's rectangular background blur. Background opacity
+is adjustable from 65–100% in Appearance settings and defaults to 94%.
 
 Ordinary searches remain one unified, adaptively ranked list; the redesign does
 not add category tabs or source filters. The non-interactive mode indicator is
@@ -121,10 +120,8 @@ content-driven height for compact empty and short states, then scrolls after it
 reaches its bounded maximum. The footer's `> Actions` label is only a discovery
 hint for the existing action prefix, not a new control or shortcut.
 
-Bounded background blur costs more GPU work than an opaque panel, but limiting
-the effect to Superbar's bounds—and keeping it inactive while the launcher is
-closed—avoids the cost of full-screen blur. For visual or lifecycle testing,
-use a fresh nested Shell so cached extension modules cannot mask changes:
+For visual or lifecycle testing, use a fresh nested Shell so cached extension
+modules cannot mask changes:
 
 ```bash
 # From the repository, close any older nested Shell, then start a fresh one.

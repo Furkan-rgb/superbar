@@ -321,6 +321,31 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     });
     appearanceGroup.add(themeRow);
 
+    const backgroundOpacityRow = new Adw.SpinRow({
+      title: "Background Opacity",
+      subtitle: "Control how much of the desktop shows through Superbar",
+      adjustment: new Gtk.Adjustment({
+        lower: 65,
+        upper: 100,
+        step_increment: 1,
+        page_increment: 5,
+        value: settings.get_int("background-opacity"),
+      }),
+    });
+    backgroundOpacityRow.add_suffix(
+      new Gtk.Label({
+        label: "%",
+        css_classes: ["dim-label"],
+      }),
+    );
+    settings.bind(
+      "background-opacity",
+      backgroundOpacityRow,
+      "value",
+      Gio.SettingsBindFlags.DEFAULT,
+    );
+    appearanceGroup.add(backgroundOpacityRow);
+
     const barWidthRow = new Adw.SpinRow({
       title: "Bar Width",
       subtitle: "Width of the Superbar in pixels",

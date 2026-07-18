@@ -22,7 +22,10 @@ const RESULTS_MAX_HEIGHT_FRACTION = 0.52;
 const OPEN_ANIMATION_MS = 250;
 const OPEN_TRANSLATION_Y = -10;
 const OPEN_SCALE = 0.985;
-const BACKGROUND_BLUR_RADIUS = 30;
+const SURFACE_COLORS = {
+  light: [240, 245, 248],
+  dark: [23, 23, 23],
+};
 const STRONG_LOCAL_MATCH_SCORE = 600;
 // Local results below this relevance score are hidden entirely (only the web
 // search remains). Substring/word/prefix matches clear it; scattered
@@ -358,22 +361,6 @@ export default class SearchBar extends Extension {
       can_focus: true,
     });
 
-    this._blurLayer = new St.Widget({
-      style_class: "spotlight-blur-layer",
-      layout_manager: new Clutter.BinLayout(),
-      x_expand: true,
-      y_expand: true,
-    });
-    this._blurSurface = new St.Widget({
-      style_class: "spotlight-blur-surface",
-      x_expand: true,
-      y_expand: true,
-      margin_top: 10,
-      margin_right: 10,
-      margin_bottom: 10,
-      margin_left: 10,
-    });
-    this._blurLayer.add_child(this._blurSurface);
     this._materialLayer = new St.Widget({
       style_class: "spotlight-material",
       x_expand: true,
@@ -391,11 +378,9 @@ export default class SearchBar extends Extension {
       y_expand: true,
     });
 
-    this._container.add_child(this._blurLayer);
     this._container.add_child(this._materialLayer);
     this._container.add_child(this._highlightLayer);
     this._container.add_child(this._contentLayer);
-    this._createBackgroundBlur();
 
     this._inputRow = new St.BoxLayout({
       style_class: "spotlight-input-row",
@@ -630,6 +615,8 @@ export default class SearchBar extends Extension {
     this._results = [];
     this._resultRows = [];
     this._resultMetadataActors = [];
+    this._clipboardCopyButtons = [];
+    this._copiedClipboardValue = null;
     this._resultsState = "hidden";
     this._applyQueryMode(this._classifyQuery(""));
 
@@ -674,6 +661,8 @@ export default class SearchBar extends Extension {
       "changed::bar-position",
       () => this._repositionContainer(),
       "changed::theme-mode",
+      () => this._updateTheme(),
+      "changed::background-opacity",
       () => this._updateTheme(),
       "changed::clipboard-monitor-enabled",
       () => this._startClipboardMonitoring(),
@@ -727,11 +716,6 @@ export default class SearchBar extends Extension {
     this._resultsClip?.remove_all_transitions();
     if (this._resultsBox) this._clearResults();
 
-    if (this._blurSurface && this._blurEffect) {
-      this._blurSurface.remove_effect(this._blurEffect);
-      this._blurEffect = null;
-    }
-
     if (this._container) {
       this._container.remove_all_transitions();
       Main.layoutManager.removeChrome(this._container);
@@ -769,8 +753,6 @@ export default class SearchBar extends Extension {
     this._contentLayer = null;
     this._highlightLayer = null;
     this._materialLayer = null;
-    this._blurSurface = null;
-    this._blurLayer = null;
     this._settings = null;
     this._appSystem = null;
     this._appUsage = null;
@@ -787,39 +769,14 @@ export default class SearchBar extends Extension {
     this._results = null;
     this._resultRows = null;
     this._resultMetadataActors = null;
+    this._clipboardCopyButtons = null;
+    this._copiedClipboardValue = null;
     this._resultsState = null;
     this._selectedIndex = -1;
     this._pendingActivation = null;
     this._resumableSession = null;
     this._activeMonitorIndex = null;
     this._searchOpen = false;
-  }
-
-  _createBackgroundBlur() {
-    this._blurEffect = null;
-
-    if (!Shell.BlurEffect || Shell.BlurMode?.BACKGROUND === undefined) {
-      this._container.add_style_class_name("no-background-blur");
-      return;
-    }
-
-    try {
-      const scaleFactor =
-        this._themeContext.scale_factor;
-      this._blurEffect = new Shell.BlurEffect({
-        mode: Shell.BlurMode.BACKGROUND,
-        radius: BACKGROUND_BLUR_RADIUS * scaleFactor,
-        brightness: 1.0,
-      });
-      this._blurSurface.add_effect_with_name(
-        "superbar-background-blur",
-        this._blurEffect,
-      );
-    } catch (error) {
-      this._blurEffect = null;
-      this._container.add_style_class_name("no-background-blur");
-      console.warn(`[Superbar] Background blur unavailable: ${error.message}`);
-    }
   }
 
   _removeSource(propertyName) {
@@ -1160,6 +1117,7 @@ export default class SearchBar extends Extension {
 
   _resetSearch() {
     this._removeSource("_selectionScrollTimeoutId");
+    this._copiedClipboardValue = null;
 
     if (this._entry.get_text().length > 0) {
       // set_text() emits text-changed synchronously, which invalidates the
@@ -2739,15 +2697,40 @@ export default class SearchBar extends Extension {
 
         rowBox.add_child(textBox);
 
-        const metadata = this._getResultMetadata(result);
-        if (metadata) {
-          const metadataLabel = this._createSingleLineLabel({
-            text: metadata,
-            style_class: "spotlight-result-metadata",
+        if (result.type === "clipboard") {
+          const copyButton = new St.Button({
+            label:
+              result.value === this._copiedClipboardValue
+                ? "copied"
+                : "copy",
+            style_class: "spotlight-result-copy",
             y_align: Clutter.ActorAlign.CENTER,
+            can_focus: false,
           });
-          this._resultMetadataActors.push(metadataLabel);
-          rowBox.add_child(metadataLabel);
+          if (result.value === this._copiedClipboardValue) {
+            copyButton.add_style_class_name("copied");
+          }
+          copyButton.connectObject(
+            "clicked",
+            () => this._copyClipboardResult(index),
+            this,
+          );
+          this._clipboardCopyButtons.push({
+            actor: copyButton,
+            value: result.value,
+          });
+          rowBox.add_child(copyButton);
+        } else {
+          const metadata = this._getResultMetadata(result);
+          if (metadata) {
+            const metadataLabel = this._createSingleLineLabel({
+              text: metadata,
+              style_class: "spotlight-result-metadata",
+              y_align: Clutter.ActorAlign.CENTER,
+            });
+            this._resultMetadataActors.push(metadataLabel);
+            rowBox.add_child(metadataLabel);
+          }
         }
 
         row.set_child(rowBox);
@@ -2764,6 +2747,7 @@ export default class SearchBar extends Extension {
     this._statusSpinner.stop();
     this._statusBox.hide();
     this._resultMetadataActors = [];
+    this._clipboardCopyButtons = [];
 
     while (this._resultRows.length > count) {
       const row = this._resultRows.pop();
@@ -2884,6 +2868,7 @@ export default class SearchBar extends Extension {
     });
     this._resultRows = [];
     this._resultMetadataActors = [];
+    this._clipboardCopyButtons = [];
     this._statusSpinner?.stop();
     this._statusBox?.hide();
   }
@@ -2907,6 +2892,13 @@ export default class SearchBar extends Extension {
   _activateResult(index) {
     const result = this._results[index];
     if (!result) return;
+
+    // Clipboard rows stay open so the inline action can visibly confirm the
+    // copy. This applies to clicking the row as well as keyboard activation.
+    if (result.type === "clipboard") {
+      this._copyClipboardResult(index);
+      return;
+    }
 
     // Clear the search before focus leaves Superbar. Some actions switch
     // windows or sessions immediately, so cleanup must happen first.
@@ -2936,7 +2928,7 @@ export default class SearchBar extends Extension {
       } catch (e) {
         console.error(`[Superbar] Failed to launch app: ${e}`);
       }
-    } else if (result.type === "calc" || result.type === "clipboard") {
+    } else if (result.type === "calc") {
       this._clipboard.set_text(St.ClipboardType.CLIPBOARD, result.value);
     } else if (result.type === "weather" || result.type === "file") {
       this._openUri(result.uri);
@@ -2950,6 +2942,23 @@ export default class SearchBar extends Extension {
     } else if (result.type === "window") {
       this._activateWindow(result.window);
     }
+  }
+
+  _copyClipboardResult(index) {
+    const result = this._results[index];
+    if (result?.type !== "clipboard") return;
+
+    this._clipboard.set_text(St.ClipboardType.CLIPBOARD, result.value);
+    this._recordResultUsage(result);
+    this._copiedClipboardValue = result.value;
+    this._setSelected(index);
+
+    this._clipboardCopyButtons.forEach(({ actor, value }) => {
+      const copied = value === result.value;
+      actor.label = copied ? "copied" : "copy";
+      if (copied) actor.add_style_class_name("copied");
+      else actor.remove_style_class_name("copied");
+    });
   }
 
   _setSelected(index) {
@@ -3214,11 +3223,14 @@ export default class SearchBar extends Extension {
       this._container.remove_style_class_name("dark-mode");
     }
 
-    if (this._blurEffect) {
-      this._blurEffect.brightness = styleVariant === "dark" ? 0.78 : 1.0;
-      this._blurEffect.radius =
-        BACKGROUND_BLUR_RADIUS * this._themeContext.scale_factor;
-    }
+    const opacity = Math.min(
+      1,
+      Math.max(0.65, this._settings.get_int("background-opacity") / 100),
+    );
+    const [red, green, blue] = SURFACE_COLORS[styleVariant];
+    this._materialLayer.set_style(
+      `background-color: rgba(${red}, ${green}, ${blue}, ${opacity});`,
+    );
 
     this._applySystemTextColor(styleVariant);
   }
