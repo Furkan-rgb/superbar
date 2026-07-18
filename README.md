@@ -10,9 +10,6 @@ A launcher and command bar for GNOME Shell, inspired by macOS Spotlight. Press
 
 ## Screenshots
 
-The images below are made with the showcase included in this repository. They
-are not screenshots of a running GNOME Shell session.
-
 |                                                                    |                                                                           |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
 | ![Dark empty state](renders/dark-empty.png)                        | ![Light search results](renders/light-search.png)                         |
