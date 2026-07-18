@@ -20,7 +20,7 @@
 .spotlight-material {
     background-color: rgba(245, 245, 244, 0.90);
     border: 1px solid rgba(255, 255, 255, 0.72);
-    box-shadow: 0 7px 20px rgba(0, 0, 0, 0.16);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
 }
 
 .spotlight-highlight {
@@ -427,7 +427,7 @@
 .dark-mode .spotlight-material {
     background-color: rgba(23, 23, 23, 0.90);
     border-color: rgba(255, 255, 255, 0.11);
-    box-shadow: 0 7px 20px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
 }
 
 .dark-mode .spotlight-highlight {

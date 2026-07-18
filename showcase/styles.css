@@ -13,7 +13,7 @@
   --row-selected: rgba(71, 153, 225, 0.25);
   --card: rgba(255, 255, 255, 0.48);
   --key: rgba(255, 255, 255, 0.58);
-  --shadow: 0 7px 20px rgba(0, 0, 0, 0.16);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
 }
 
 * {
@@ -38,7 +38,7 @@ body[data-theme="dark"] {
   --row-selected: rgba(62, 142, 213, 0.25);
   --card: rgba(255, 255, 255, 0.055);
   --key: rgba(255, 255, 255, 0.06);
-  --shadow: 0 7px 20px rgba(0, 0, 0, 0.28);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
 }
 
 .desktop {
