@@ -69,9 +69,7 @@ Log out and back in if this is the first time installing.
 - GNOME Shell 49 or 50
 - An internet connection for weather, dictionary, and currency features
 
-## Local development and testing
-
-The commands I use most often are:
+## Makefile commands
 
 ```bash
 make help
