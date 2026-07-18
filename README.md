@@ -9,14 +9,17 @@ Open it from anywhere with **Alt+Space**.
 
 ---
 
-## Screenshots
+## UI Renders
 
-|                                                          |                                                        |
-| -------------------------------------------------------- | ------------------------------------------------------ |
-| ![Dark mode](screenshots/superbar_dark.png)              | ![App launcher](screenshots/superbar_dark_app.png)     |
-| ![Weather](screenshots/superbar_dark_weather.png)        | ![Math](screenshots/superbar_dark_math.png)            |
-| ![Currency](screenshots/superbar_dark_currency.png)      | ![Actions](screenshots/superbar_actions.png)           |
-| ![Light weather](screenshots/superbar_light_weather.png) | ![Light folder](screenshots/superbar_light_folder.png) |
+Deterministic high-resolution renders are generated from the local showcase
+HTML/CSS so the README stays aligned with the extension UI.
+
+|                                                                    |                                                                           |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| ![Dark empty state](renders/dark-empty.png)                        | ![Light search results](renders/light-search.png)                         |
+| ![Dark search results](renders/dark-search.png)                    | ![Dark bottom-positioned results](renders/dark-bottom-search.png)         |
+| ![Light clipboard results](renders/light-clipboard.png)            | ![Dark clipboard copied state](renders/dark-clipboard-copied.png)         |
+| ![Light calculator result](renders/light-calculator.png)           | ![Dark weather result](renders/dark-weather.png)                          |
 
 ---
 
@@ -94,9 +97,9 @@ Run `make renders` to generate consistent high-resolution 1716×1298 PNG
 illustrations in `renders/`. The 2× pixel density is the default while the
 composition remains equivalent to an 858×649 canvas. The showcase mirrors
 Superbar's current dimensions, neutral light and dark surfaces, result rows,
-mode indicator, footer, and background opacity. It uses local HTML, CSS, vector
-icons, and headless Chrome/Chromium, so it does not need npm packages or network
-access.
+bottom-positioned expansion, mode indicator, footer, and background opacity. It
+uses local HTML, CSS, vector icons, and headless Chrome/Chromium, so it does not
+need npm packages or network access.
 
 ```bash
 make renders          # every state
@@ -141,9 +144,10 @@ Background opacity is adjustable from 65–100% in Appearance settings and
 defaults to 90%.
 
 When Vertical Position is set to Bottom, the search row remains anchored at its
-configured screen position while the result panel reveals upward. This keeps
-the launcher clear of the lower screen edge and makes the expansion direction
-match its placement.
+configured screen position, the footer stays on the underside of the bar, and
+the result panel reveals upward. Bottom placement mirrors Top: the bottom edge
+sits the same distance from the lower work-area edge that Top sits from the
+upper work-area edge. Center is the default vertical position.
 
 Ordinary searches remain one unified, adaptively ranked list; the redesign does
 not add category tabs or source filters. The non-interactive mode indicator is
