@@ -313,6 +313,7 @@ export default class SearchBar extends Extension {
     this._session = new Soup.Session();
     this._clipboard = St.Clipboard.get_default();
     this._clipboardHistory = [];
+    this._clipboardSearchHistory = null;
     this._loadClipboardHistory();
 
     this._appSystem = Shell.AppSystem.get_default();
@@ -764,6 +765,7 @@ export default class SearchBar extends Extension {
     this._themeContext = null;
     this._clipboard = null;
     this._clipboardHistory = null;
+    this._clipboardSearchHistory = null;
     this._rankingHistory?.clear();
     this._rankingHistory = null;
     this._results = null;
@@ -1031,14 +1033,19 @@ export default class SearchBar extends Extension {
     this._searchOpen = true;
     const resumableSession = this._takeResumableSession();
     const resumed = resumableSession !== null;
+    const currentQuery = this._classifyQuery(
+      this._entry.get_text().trim(),
+    );
 
     if (resumed) {
-      if (resumableSession.hadPendingSearch || this._results.length === 0) {
+      if (
+        currentQuery.kind === "clipboard" ||
+        resumableSession.hadPendingSearch ||
+        this._results.length === 0
+      ) {
         this._onTextChanged(true);
       } else {
-        this._applyQueryMode(
-          this._classifyQuery(this._entry.get_text().trim()),
-        );
+        this._applyQueryMode(currentQuery);
         this._updateSelection();
       }
     } else {
@@ -1091,6 +1098,7 @@ export default class SearchBar extends Extension {
 
     const savedSession = preserveSession && this._saveResumableSession();
     this._searchOpen = false;
+    this._clipboardSearchHistory = null;
     global.stage.set_key_focus(null);
     if (savedSession) {
       this._invalidatePendingSearch();
@@ -1118,6 +1126,7 @@ export default class SearchBar extends Extension {
   _resetSearch() {
     this._removeSource("_selectionScrollTimeoutId");
     this._copiedClipboardValue = null;
+    this._clipboardSearchHistory = null;
 
     if (this._entry.get_text().length > 0) {
       // set_text() emits text-changed synchronously, which invalidates the
@@ -1137,6 +1146,16 @@ export default class SearchBar extends Extension {
       clearResumableSession: true,
     });
     const query = this._classifyQuery(text);
+    if (query.kind === "clipboard") {
+      // Keep clipboard results in their entry order for this query session.
+      // The monitor still updates the persisted MRU order, which becomes
+      // visible after leaving and reopening/resetting clipboard search.
+      if (this._clipboardSearchHistory === null) {
+        this._clipboardSearchHistory = [...this._clipboardHistory];
+      }
+    } else {
+      this._clipboardSearchHistory = null;
+    }
     this._applyQueryMode(query);
 
     if (text.length === 0) {
@@ -1459,6 +1478,7 @@ export default class SearchBar extends Extension {
 
   _clearClipboardHistory() {
     this._clipboardHistory = [];
+    this._clipboardSearchHistory = null;
     this._saveClipboardHistory();
 
     if (!this._searchOpen) return;
@@ -1612,8 +1632,9 @@ export default class SearchBar extends Extension {
   }
 
   _searchClipboardHistory(query) {
+    const history = this._clipboardSearchHistory ?? this._clipboardHistory;
     return this._rankResultsByQuery(
-      this._clipboardHistory.map((entry) => ({
+      history.map((entry) => ({
         type: "clipboard",
         label: entry.preview ?? entry.text.replace(/\s+/g, " ").slice(0, 80),
         subtitle: "Clipboard history",
