@@ -39,12 +39,55 @@ const SOURCE_RANK_BONUS = {
   folder: 35,
   file: 10,
 };
+const QUERY_MODE_PRESENTATION = {
+  generic: { label: "All results", iconName: "system-search-symbolic" },
+  currency: { label: "Currency", iconName: "view-refresh-symbolic" },
+  weather: { label: "Weather", iconName: "weather-clear-symbolic" },
+  dictionary: {
+    label: "Dictionary",
+    iconName: "accessories-dictionary-symbolic",
+  },
+  clipboard: { label: "Clipboard", iconName: "edit-paste-symbolic" },
+  actions: { label: "Actions", iconName: "system-run-symbolic" },
+  calculator: {
+    label: "Calculator",
+    iconName: "accessories-calculator-symbolic",
+  },
+};
+const CURRENCY_ALIASES = {
+  yen: "JPY",
+  euro: "EUR",
+  euros: "EUR",
+  dollar: "USD",
+  dollars: "USD",
+  pound: "GBP",
+  pounds: "GBP",
+  rupee: "INR",
+};
 const SYSTEM_FOLDERS = [
-  "Downloads",
-  "Documents",
-  "Pictures",
-  "Videos",
-  "Music",
+  {
+    name: "Downloads",
+    action: {
+      icon: "folder-download-symbolic",
+      keywords: ["downloads", "download folder"],
+    },
+  },
+  {
+    name: "Documents",
+    action: {
+      icon: "folder-documents-symbolic",
+      keywords: ["documents", "docs", "document folder"],
+    },
+  },
+  {
+    name: "Pictures",
+    action: {
+      icon: "folder-pictures-symbolic",
+      keywords: ["pictures", "photos", "images"],
+    },
+  },
+  { name: "Videos", action: null },
+  { name: "Music", action: null },
 ];
 
 function normalizeSearchText(value) {
@@ -260,6 +303,8 @@ export default class SearchBar extends Extension {
     this._resumableSession = null;
     this._activeMonitorIndex = null;
     this._settings = this.getSettings();
+    this._shellSettings = St.Settings.get();
+    this._themeContext = St.ThemeContext.get_for_stage(global.stage);
     this._rankingHistory = new Map();
     this._loadRankingHistory();
     this._session = new Soup.Session();
@@ -269,6 +314,7 @@ export default class SearchBar extends Extension {
 
     this._appSystem = Shell.AppSystem.get_default();
     this._appUsage = Shell.AppUsage.get_default();
+    this._systemActions = SystemActions.getDefault();
     this._appSystem.connectObject(
       "installed-changed",
       () => this._refreshAppCache(),
@@ -281,15 +327,29 @@ export default class SearchBar extends Extension {
       () => this._refreshCurrentSearch(),
       this,
     );
-    this._folderCache = SYSTEM_FOLDERS.map((name) => ({
-      type: "file",
-      label: name,
-      subtitle: "Folder",
-      icon: "folder-symbolic",
-      uri: Gio.File.new_for_path(
+    this._folderCache = SYSTEM_FOLDERS.map(({ name, action }) => {
+      const uri = Gio.File.new_for_path(
         GLib.build_filenamev([GLib.get_home_dir(), name]),
-      ).get_uri(),
-    }));
+      ).get_uri();
+
+      return {
+        searchResult: {
+          type: "file",
+          label: name,
+          subtitle: "Folder",
+          icon: "folder-symbolic",
+          uri,
+        },
+        actionCommand: action
+          ? {
+              label: `Open ${name}`,
+              uri,
+              icon: action.icon,
+              keywords: action.keywords,
+            }
+          : null,
+      };
+    });
 
     this._container = new St.Widget({
       style_class: "spotlight-container",
@@ -375,13 +435,11 @@ export default class SearchBar extends Extension {
       style_class: "spotlight-mode-dot",
       y_align: Clutter.ActorAlign.CENTER,
     });
-    this._modeLabel = new St.Label({
+    this._modeLabel = this._createSingleLineLabel({
       text: "All results",
       style_class: "spotlight-mode-label",
       y_align: Clutter.ActorAlign.CENTER,
     });
-    this._modeLabel.clutter_text.set_single_line_mode(true);
-    this._modeLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
     this._modeInner.add_child(this._modeDot);
     this._modeInner.add_child(this._modeLabel);
     this._modeIndicator.add_child(this._modeInner);
@@ -413,13 +471,11 @@ export default class SearchBar extends Extension {
     });
     this._statusSpinner.add_style_class_name("spotlight-status-icon");
     this._statusSpinner.x_align = Clutter.ActorAlign.CENTER;
-    this._statusLabel = new St.Label({
+    this._statusLabel = this._createSingleLineLabel({
       style_class: "spotlight-status-label",
       x_align: Clutter.ActorAlign.CENTER,
       x_expand: true,
     });
-    this._statusLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-    this._statusLabel.clutter_text.set_single_line_mode(true);
     this._statusLabel.clutter_text.set_line_alignment(Pango.Alignment.CENTER);
     this._statusBox.add_child(this._statusSpinner);
     this._statusBox.add_child(this._statusLabel);
@@ -575,9 +631,8 @@ export default class SearchBar extends Extension {
     this._resultRows = [];
     this._resultMetadataActors = [];
     this._resultsState = "hidden";
-    this._updateModeIndicator("");
+    this._applyQueryMode(this._classifyQuery(""));
 
-    this._shellSettings = St.Settings.get();
     this._shellSettings.connectObject(
       "notify::color-scheme",
       () => this._updateTheme(),
@@ -586,7 +641,7 @@ export default class SearchBar extends Extension {
       this,
     );
     Main.sessionMode.connectObject("updated", () => this._updateTheme(), this);
-    St.ThemeContext.get_for_stage(global.stage).connectObject(
+    this._themeContext.connectObject(
       "changed",
       () => {
         this._updateTheme();
@@ -661,18 +716,13 @@ export default class SearchBar extends Extension {
     this._entry?.clutter_text.disconnectObject(this);
     this._shellSettings?.disconnectObject(this);
     Main.sessionMode.disconnectObject(this);
-    St.ThemeContext.get_for_stage(global.stage).disconnectObject(this);
+    this._themeContext?.disconnectObject(this);
     if (this._container) {
       Main.layoutManager.disconnectObject(this._container);
       global.display.disconnectObject(this._container);
     }
 
-    if (this._clickShield) {
-      this._clickShield.disconnectObject(this);
-      Main.layoutManager.removeChrome(this._clickShield);
-      this._clickShield.destroy();
-      this._clickShield = null;
-    }
+    this._destroyClickShield();
 
     this._resultsClip?.remove_all_transitions();
     if (this._resultsBox) this._clearResults();
@@ -724,10 +774,12 @@ export default class SearchBar extends Extension {
     this._settings = null;
     this._appSystem = null;
     this._appUsage = null;
+    this._systemActions = null;
     this._appCache = null;
     this._windowTracker = null;
     this._folderCache = null;
     this._shellSettings = null;
+    this._themeContext = null;
     this._clipboard = null;
     this._clipboardHistory = null;
     this._rankingHistory?.clear();
@@ -753,7 +805,7 @@ export default class SearchBar extends Extension {
 
     try {
       const scaleFactor =
-        St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        this._themeContext.scale_factor;
       this._blurEffect = new Shell.BlurEffect({
         mode: Shell.BlurMode.BACKGROUND,
         radius: BACKGROUND_BLUR_RADIUS * scaleFactor,
@@ -839,10 +891,18 @@ export default class SearchBar extends Extension {
     }
   }
 
+  _getResultAppIdentity(result) {
+    return result.appIdentity ?? result.appId;
+  }
+
+  _getResultAppAction(result) {
+    return result.appAction ?? "launch";
+  }
+
   _getResultRankingKey(result) {
-    const appIdentity = result.appIdentity ?? result.appId;
+    const appIdentity = this._getResultAppIdentity(result);
     if (result.type === "app" && appIdentity) {
-      return `app:${result.appAction ?? "launch"}:${appIdentity}`;
+      return `app:${this._getResultAppAction(result)}:${appIdentity}`;
     }
     if (result.type === "window" && appIdentity) {
       return `app:switch:${appIdentity}`;
@@ -856,13 +916,15 @@ export default class SearchBar extends Extension {
     return actionId ? `action:${actionId}` : null;
   }
 
+  _isAdaptiveRankingEnabled() {
+    return Boolean(
+      this._settings?.get_boolean("adaptive-ranking-enabled") &&
+        this._rankingHistory,
+    );
+  }
+
   _getAdaptiveRankingBoost(result) {
-    if (
-      !this._settings?.get_boolean("adaptive-ranking-enabled") ||
-      !this._rankingHistory
-    ) {
-      return 0;
-    }
+    if (!this._isAdaptiveRankingEnabled()) return 0;
 
     const key = this._getResultRankingKey(result);
     const entry = key ? this._rankingHistory.get(key) : null;
@@ -876,12 +938,7 @@ export default class SearchBar extends Extension {
   }
 
   _recordResultUsage(result) {
-    if (
-      !this._settings?.get_boolean("adaptive-ranking-enabled") ||
-      !this._rankingHistory
-    ) {
-      return;
-    }
+    if (!this._isAdaptiveRankingEnabled()) return;
 
     const key = this._getResultRankingKey(result);
     if (!key) return;
@@ -983,13 +1040,24 @@ export default class SearchBar extends Extension {
     return session;
   }
 
-  _suspendSearch() {
+  _invalidatePendingSearch({ clearResumableSession = false } = {}) {
     this._searchGeneration += 1;
     this._pendingActivation = null;
+    if (clearResumableSession) this._resumableSession = null;
     this._cancelPendingSearch();
+    return this._searchGeneration;
   }
 
   // --- Open / Close ---
+
+  _destroyClickShield() {
+    if (!this._clickShield) return;
+
+    this._clickShield.disconnectObject(this);
+    Main.layoutManager.removeChrome(this._clickShield);
+    this._clickShield.destroy();
+    this._clickShield = null;
+  }
 
   _toggleSearch() {
     if (this._searchOpen) {
@@ -1011,7 +1079,9 @@ export default class SearchBar extends Extension {
       if (resumableSession.hadPendingSearch || this._results.length === 0) {
         this._onTextChanged(true);
       } else {
-        this._updateSearchIcon(this._entry.get_text().trim());
+        this._applyQueryMode(
+          this._classifyQuery(this._entry.get_text().trim()),
+        );
         this._updateSelection();
       }
     } else {
@@ -1021,11 +1091,7 @@ export default class SearchBar extends Extension {
     this._repositionContainer();
     this._pollClipboard();
 
-    if (this._clickShield) {
-      this._clickShield.disconnectObject(this);
-      Main.layoutManager.removeChrome(this._clickShield);
-      this._clickShield.destroy();
-    }
+    this._destroyClickShield();
 
     this._clickShield = new St.Widget({
       reactive: true,
@@ -1070,17 +1136,12 @@ export default class SearchBar extends Extension {
     this._searchOpen = false;
     global.stage.set_key_focus(null);
     if (savedSession) {
-      this._suspendSearch();
+      this._invalidatePendingSearch();
     } else {
       this._resetSearch();
     }
 
-    if (this._clickShield) {
-      this._clickShield.disconnectObject(this);
-      Main.layoutManager.removeChrome(this._clickShield);
-      this._clickShield.destroy();
-      this._clickShield = null;
-    }
+    this._destroyClickShield();
 
     this._container.remove_all_transitions();
     this._container.ease({
@@ -1098,15 +1159,14 @@ export default class SearchBar extends Extension {
   }
 
   _resetSearch() {
-    this._searchGeneration += 1;
-    this._pendingActivation = null;
-    this._resumableSession = null;
-    this._cancelPendingSearch();
     this._removeSource("_selectionScrollTimeoutId");
 
     if (this._entry.get_text().length > 0) {
+      // set_text() emits text-changed synchronously, which invalidates the
+      // active generation and cancels pending work in one place.
       this._entry.set_text("");
     } else {
+      this._invalidatePendingSearch({ clearResumableSession: true });
       this._hideResults();
     }
   }
@@ -1115,75 +1175,69 @@ export default class SearchBar extends Extension {
 
   _onTextChanged(preserveSelection = false) {
     const text = this._entry.get_text().trim();
-    const generation = ++this._searchGeneration;
-
-    this._pendingActivation = null;
-    this._resumableSession = null;
-    this._cancelPendingSearch();
-    this._updateSearchIcon(text);
+    const generation = this._invalidatePendingSearch({
+      clearResumableSession: true,
+    });
+    const query = this._classifyQuery(text);
+    this._applyQueryMode(query);
 
     if (text.length === 0) {
       this._hideResults();
       return;
     }
 
-    if (this._isCurrencyExpression(text)) {
+    if (query.kind === "currency") {
       this._scheduleRemoteSearch(text, generation, (cancellable) =>
-        this._fetchCurrency(text, generation, cancellable),
+        this._fetchCurrency(text, query.payload, generation, cancellable),
       );
       return;
     }
 
-    if (this._isWeatherQuery(text)) {
+    if (query.kind === "weather") {
       this._scheduleRemoteSearch(text, generation, (cancellable) =>
-        this._fetchWeather(text, generation, cancellable),
+        this._fetchWeather(text, query.payload, generation, cancellable),
       );
       return;
     }
 
-    if (/^def(?:ine)?\s+/i.test(text)) {
+    if (query.kind === "dictionary") {
       this._scheduleRemoteSearch(text, generation, (cancellable) =>
-        this._fetchDictionary(text, generation, cancellable),
+        this._fetchDictionary(text, query.payload, generation, cancellable),
       );
       return;
     }
 
-    const clipboardQuery = this._parseClipboardQuery(text);
-    if (clipboardQuery !== null) {
+    if (query.kind === "clipboard") {
       this._showResults(
-        this._searchClipboardHistory(clipboardQuery),
+        this._searchClipboardHistory(query.payload),
         preserveSelection,
       );
       return;
     }
 
-    const actionQuery = this._parseActionQuery(text);
-    if (actionQuery !== null) {
+    if (query.kind === "actions") {
       this._showResults(
-        this._searchSystemCommands(actionQuery),
+        this._searchSystemCommands(query.payload),
         preserveSelection,
       );
       return;
     }
 
-    if (this._isMathExpression(text)) {
-      const calcResult = this._evaluate(text);
-      if (calcResult !== null) {
-        this._showResults(
-          [
-            {
-              type: "calc",
-              label: `= ${calcResult}`,
-              subtitle: "Press Enter to copy",
-              icon: "accessories-calculator-symbolic",
-              value: String(calcResult),
-              answerContext: text,
-            },
-          ],
-          preserveSelection,
-        );
-        return;
-      }
+    if (query.kind === "calculator") {
+      this._showResults(
+        [
+          {
+            type: "calc",
+            label: `= ${query.payload}`,
+            subtitle: "Press Enter to copy",
+            icon: "accessories-calculator-symbolic",
+            value: String(query.payload),
+            answerContext: text,
+          },
+        ],
+        preserveSelection,
+      );
+      return;
     }
 
     // Apps, windows, and common folders are cheap and render immediately.
@@ -1195,15 +1249,11 @@ export default class SearchBar extends Extension {
     // Indexed file search is deferred so typing remains responsive.
     if (text.length < 2) return;
 
-    this._removeSource("_searchTimeout");
-    this._searchTimeout = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT,
+    this._scheduleCurrentQuery(
+      text,
+      generation,
       FILE_SEARCH_DELAY_MS,
       () => {
-        this._searchTimeout = null;
-        if (!this._isCurrentQuery(text, generation))
-          return GLib.SOURCE_REMOVE;
-
         const cancellable = new Gio.Cancellable();
         this._fileSearchCancellable = cancellable;
         this._searchFiles(text, cancellable).then((fileResults) => {
@@ -1216,121 +1266,150 @@ export default class SearchBar extends Extension {
             true,
           );
         });
-
-        return GLib.SOURCE_REMOVE;
       },
     );
   }
 
-  _isWeatherQuery(text) {
-    return /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+/i.test(
-      text,
+  _parseCurrencyQuery(text) {
+    const match = text
+      .trim()
+      .match(
+        /^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)\s+to\s+([a-zA-Z]+)$/i,
+      );
+    if (!match) return null;
+
+    const normalizeCode = (value) =>
+      CURRENCY_ALIASES[value.toLowerCase()] ?? value.toUpperCase();
+    return {
+      amount: match[1],
+      from: normalizeCode(match[2]),
+      to: normalizeCode(match[3]),
+    };
+  }
+
+  _parseWeatherQuery(text) {
+    const match = text
+      .trim()
+      .match(
+        /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+(.+)$/i,
+      );
+    return match ? match[1].trim() : null;
+  }
+
+  _parseDictionaryQuery(text) {
+    const match = text.trim().match(/^def(?:ine)?\s+(.+)$/i);
+    return match ? match[1].trim() : null;
+  }
+
+  _classifyQuery(text) {
+    const currencyQuery = this._parseCurrencyQuery(text);
+    if (currencyQuery !== null) {
+      return { kind: "currency", payload: currencyQuery };
+    }
+
+    const weatherQuery = this._parseWeatherQuery(text);
+    if (weatherQuery !== null) {
+      return { kind: "weather", payload: weatherQuery };
+    }
+
+    const dictionaryQuery = this._parseDictionaryQuery(text);
+    if (dictionaryQuery !== null) {
+      return { kind: "dictionary", payload: dictionaryQuery };
+    }
+
+    const clipboardQuery = this._parseClipboardQuery(text);
+    if (clipboardQuery !== null) {
+      return { kind: "clipboard", payload: clipboardQuery };
+    }
+
+    const actionQuery = this._parseActionQuery(text);
+    if (actionQuery !== null) {
+      return { kind: "actions", payload: actionQuery };
+    }
+
+    if (this._isMathExpression(text)) {
+      const result = evaluateMathExpression(text);
+      if (result !== null) {
+        return { kind: "calculator", payload: result };
+      }
+    }
+
+    return { kind: "generic", payload: text };
+  }
+
+  _applyQueryMode(query) {
+    const mode =
+      QUERY_MODE_PRESENTATION[query.kind] ?? QUERY_MODE_PRESENTATION.generic;
+    this._icon.icon_name = mode.iconName;
+    if (this._modeLabel) this._modeLabel.text = mode.label;
+  }
+
+  _scheduleCurrentQuery(text, generation, delay, callback) {
+    this._searchTimeout = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      delay,
+      () => {
+        this._searchTimeout = null;
+        if (this._isCurrentQuery(text, generation)) callback();
+        return GLib.SOURCE_REMOVE;
+      },
     );
   }
 
   _scheduleRemoteSearch(text, generation, callback) {
     this._showStatus("loading", "Searching…");
 
-    this._removeSource("_searchTimeout");
-    this._searchTimeout = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT,
+    this._scheduleCurrentQuery(
+      text,
+      generation,
       REMOTE_SEARCH_DELAY_MS,
       () => {
-        this._searchTimeout = null;
-        if (!this._isCurrentQuery(text, generation))
-          return GLib.SOURCE_REMOVE;
-
         const cancellable = new Gio.Cancellable();
         this._networkCancellable = cancellable;
         callback(cancellable).finally(() => {
           if (this._networkCancellable === cancellable)
             this._networkCancellable = null;
         });
-
-        return GLib.SOURCE_REMOVE;
       },
     );
   }
 
-  _updateSearchIcon(text) {
-    const mode = this._getQueryMode(text);
-    this._icon.icon_name = mode.iconName;
-    this._updateModeIndicator(text, mode);
-  }
-
-  _getQueryMode(text) {
-    if (this._isCurrencyExpression(text)) {
-      return { label: "Currency", iconName: "view-refresh-symbolic" };
-    }
-    if (this._isWeatherQuery(text)) {
-      return { label: "Weather", iconName: "weather-clear-symbolic" };
-    }
-    if (/^def(?:ine)?\s+/i.test(text)) {
-      return {
-        label: "Dictionary",
-        iconName: "accessories-dictionary-symbolic",
-      };
-    }
-    if (this._parseClipboardQuery(text) !== null) {
-      return { label: "Clipboard", iconName: "edit-paste-symbolic" };
-    }
-    if (this._parseActionQuery(text) !== null) {
-      return { label: "Actions", iconName: "system-run-symbolic" };
-    }
-    if (
-      this._isMathExpression(text) &&
-      this._evaluate(text) !== null
-    ) {
-      return {
-        label: "Calculator",
-        iconName: "accessories-calculator-symbolic",
-      };
-    }
-
-    return { label: "All results", iconName: "system-search-symbolic" };
-  }
-
-  _updateModeIndicator(text, mode = null) {
-    if (!this._modeLabel) return;
-
-    this._modeLabel.text = (mode ?? this._getQueryMode(text)).label;
-  }
-
   _buildGenericResults(text, fileResults = []) {
+    const windowContext = this._createWindowSearchContext();
     const folderMatches = this._folderCache
-      .map((folder) => {
-        const matchScore = this._scoreSearchMatch(folder.label, text);
+      .map(({ searchResult }) => {
+        const matchScore = scoreSearchMatch(searchResult.label, text);
         return {
-          ...folder,
+          ...searchResult,
           _source: "folder",
-          _matchScore: matchScore,
+          _relevanceScore: matchScore,
         };
       })
-      .filter((folder) => folder._matchScore >= 0);
+      .filter((folder) => folder._relevanceScore >= 0);
 
     const matchedFileResults = fileResults
       .map((result) => {
-        const labelScore = this._scoreSearchMatch(result.label, text);
-        const subtitleScore = this._scoreSearchMatch(
+        const labelScore = scoreSearchMatch(result.label, text);
+        const subtitleScore = scoreSearchMatch(
           result.subtitle ?? "",
           text,
         );
         return {
           ...result,
           _source: "file",
-          _matchScore: Math.max(
+          _relevanceScore: Math.max(
             labelScore,
             subtitleScore < 0 ? -1 : subtitleScore - 120,
           ),
         };
       })
-      .filter((result) => result._matchScore >= 0);
+      .filter((result) => result._relevanceScore >= 0);
 
     const localResults = this._dedupeResults(
       this._rankGenericResults(
         [
-          ...this._searchApps(text),
-          ...this._searchWindows(text),
+          ...this._searchApps(text, windowContext),
+          ...this._searchWindows(text, windowContext),
           ...folderMatches,
           ...matchedFileResults,
         ],
@@ -1348,19 +1427,19 @@ export default class SearchBar extends Extension {
     const weakLocalResults = [];
 
     for (const result of localResults) {
-      const relevance = result._matchScore ?? -1;
-      delete result._matchScore;
+      const relevance = result._relevanceScore ?? -1;
+      delete result._relevanceScore;
 
       // Hide results that only matched weakly (e.g. a scattered subsequence
       // buried in an app's description) so unrelated entries don't appear.
       if (relevance < MINIMUM_LOCAL_MATCH_SCORE) continue;
 
-      const matchScore = Math.max(
-        this._scoreSearchMatch(result.label ?? "", text),
-        this._scoreSearchMatch(result.subtitle ?? "", text),
-      );
+      // Relevance may come from hidden app metadata or source-specific
+      // penalties. Visible-text strength separately controls whether the web
+      // fallback appears before or after this local result.
+      const visibleMatchScore = this._getVisibleResultMatchScore(result, text);
 
-      if (matchScore >= STRONG_LOCAL_MATCH_SCORE) {
+      if (visibleMatchScore >= STRONG_LOCAL_MATCH_SCORE) {
         strongLocalResults.push(result);
       } else {
         weakLocalResults.push(result);
@@ -1377,10 +1456,10 @@ export default class SearchBar extends Extension {
   _parseClipboardQuery(text) {
     const normalized = text.trim();
     const match = normalized.match(
-      /^(?:clip|clipboard|history)(?::|\s+)?(.*)$/i,
+      /^(?:clipboard|clip|history)(?:(?::|\s+)(.*))?$/i,
     );
     if (!match) return null;
-    return match[1].trim();
+    return (match[1] ?? "").trim();
   }
 
   _getClipboardHistoryPath() {
@@ -1480,8 +1559,11 @@ export default class SearchBar extends Extension {
     }
   }
 
-  _scoreSearchMatch(text, query) {
-    return scoreSearchMatch(text, query);
+  _getVisibleResultMatchScore(result, query) {
+    return Math.max(
+      scoreSearchMatch(result.label ?? "", query),
+      scoreSearchMatch(result.subtitle ?? "", query),
+    );
   }
 
   _rankResultsByQuery(
@@ -1491,7 +1573,7 @@ export default class SearchBar extends Extension {
   ) {
     return results
       .map((result, index) => ({
-        score: this._scoreSearchMatch(textSelector(result), query),
+        score: scoreSearchMatch(textSelector(result), query),
         result,
         index,
       }))
@@ -1505,7 +1587,7 @@ export default class SearchBar extends Extension {
       result,
       index,
       score:
-        result._matchScore +
+        result._relevanceScore +
         (SOURCE_RANK_BONUS[result._source] ?? 0) +
         (result._contextBoost ?? 0) +
         this._getAdaptiveRankingBoost(result),
@@ -1515,7 +1597,7 @@ export default class SearchBar extends Extension {
     for (const entry of rankedResults) {
       if (entry.result.type !== "window") continue;
 
-      const identity = entry.result.appIdentity ?? entry.result.appId;
+      const identity = this._getResultAppIdentity(entry.result);
       if (!identity) continue;
 
       const currentScore = lowestWindowScoreByApp.get(identity);
@@ -1532,7 +1614,7 @@ export default class SearchBar extends Extension {
         continue;
       }
 
-      const identity = entry.result.appIdentity ?? entry.result.appId;
+      const identity = this._getResultAppIdentity(entry.result);
       const lowestWindowScore = lowestWindowScoreByApp.get(identity);
       if (lowestWindowScore !== undefined) {
         entry.score = Math.min(entry.score, lowestWindowScore - 1);
@@ -1558,14 +1640,14 @@ export default class SearchBar extends Extension {
         }
 
         const matchDifference =
-          b.result._matchScore - a.result._matchScore;
+          b.result._relevanceScore - a.result._relevanceScore;
         return matchDifference || a.index - b.index;
       })
       .map(({ result }) => {
         const publicResult = { ...result };
         delete publicResult._source;
         delete publicResult._contextBoost;
-        // _matchScore is kept so _buildGenericResults can apply a relevance
+        // _relevanceScore is kept so _buildGenericResults can apply a relevance
         // floor; it is stripped there once the results are partitioned.
         return publicResult;
       });
@@ -1594,9 +1676,9 @@ export default class SearchBar extends Extension {
     if (symbolMatch) return symbolMatch[1].trim();
 
     const prefixMatch = normalized.match(
-      /^(?:cmd|command|action)(?::|\s+)?(.*)$/i,
+      /^(?:command|cmd|action)(?:(?::|\s+)(.*))?$/i,
     );
-    if (prefixMatch) return prefixMatch[1].trim();
+    if (prefixMatch) return (prefixMatch[1] ?? "").trim();
 
     return null;
   }
@@ -1713,6 +1795,56 @@ export default class SearchBar extends Extension {
     return keys;
   }
 
+  _createWindowSearchContext() {
+    const orderedWindows = global.display.get_tab_list(
+      Meta.TabList.NORMAL_ALL,
+      null,
+    );
+    const windowsByClass = new Map();
+    const windowData = orderedWindows.map((window, mruIndex) => {
+      for (const key of this._getWindowClassKeys(window)) {
+        const bucket = windowsByClass.get(key);
+        if (bucket) bucket.push(window);
+        else windowsByClass.set(key, [window]);
+      }
+
+      const title = window.get_title()?.trim() ?? "";
+      const app = this._windowTracker.get_window_app(window);
+      const appName = app?.get_name()?.trim() ?? "";
+      const appId = app?.get_id() ?? null;
+      const appIdentity = this._getShellAppIdentity(app);
+      const label = title || appName || "Untitled window";
+      const appKey =
+        appIdentity || appId || normalizeSearchText(appName) || "unknown";
+
+      return {
+        window,
+        mruIndex,
+        title,
+        app,
+        appName,
+        appId,
+        appIdentity,
+        label,
+        workspace: window.get_workspace(),
+        monitorIndex: window.get_monitor(),
+        duplicateKey: `${appKey}\u001f${normalizeSearchText(label)}`,
+      };
+    });
+
+    return {
+      activeWorkspace: global.workspace_manager.get_active_workspace(),
+      targetMonitor: this._resolveActiveMonitorIndex(),
+      orderedWindows,
+      searchableWindows: new Set(orderedWindows),
+      windowsByClass,
+      windowData,
+      windowDataByWindow: new Map(
+        windowData.map((data) => [data.window, data]),
+      ),
+    };
+  }
+
   _getShellAppSearchScores(text) {
     const scores = new Map();
 
@@ -1730,26 +1862,17 @@ export default class SearchBar extends Extension {
     return scores;
   }
 
-  _searchApps(text) {
-    const activeWorkspace = global.workspace_manager.get_active_workspace();
-    const targetMonitor =
-      this._activeMonitorIndex ?? this._getTargetMonitorIndex();
+  _searchApps(text, windowContext) {
+    const {
+      activeWorkspace,
+      targetMonitor,
+      orderedWindows,
+      searchableWindows,
+      windowsByClass,
+      windowDataByWindow,
+    } = windowContext;
     const shellSearchScores = this._getShellAppSearchScores(text);
     const runningAppsByIdentity = new Map();
-    // MRU-ordered so the first matched window is the most recently used.
-    const orderedWindows = global.display.get_tab_list(
-      Meta.TabList.NORMAL_ALL,
-      null,
-    );
-    const searchableWindows = new Set(orderedWindows);
-    const windowsByClass = new Map();
-    for (const window of orderedWindows) {
-      for (const key of this._getWindowClassKeys(window)) {
-        const bucket = windowsByClass.get(key);
-        if (bucket) bucket.push(window);
-        else windowsByClass.set(key, [window]);
-      }
-    }
 
     for (const runningApp of this._appSystem.get_running?.() ?? []) {
       const identity = this._getShellAppIdentity(runningApp);
@@ -1765,8 +1888,8 @@ export default class SearchBar extends Extension {
     }
 
     return (this._appCache ?? []).flatMap((app) => {
-      const labelScore = this._scoreSearchMatch(app.label, text);
-      const metadataScore = this._scoreSearchMatch(app.searchText, text);
+      const labelScore = scoreSearchMatch(app.label, text);
+      const metadataScore = scoreSearchMatch(app.searchText, text);
       const matchScore = Math.max(
         labelScore,
         metadataScore < 0 ? -1 : metadataScore - 80,
@@ -1805,7 +1928,8 @@ export default class SearchBar extends Extension {
       if (actionApp?.is_on_workspace(activeWorkspace)) contextBoost += 20;
       if (
         appWindows.some(
-          (window) => window.get_monitor() === targetMonitor,
+          (window) =>
+            windowDataByWindow.get(window)?.monitorIndex === targetMonitor,
         )
       ) {
         contextBoost += 15;
@@ -1824,7 +1948,7 @@ export default class SearchBar extends Extension {
           shellApp: actionApp,
           activateWindow: appWindows[0] ?? null,
           _source: "app",
-          _matchScore: matchScore,
+          _relevanceScore: matchScore,
           _contextBoost: contextBoost,
         });
 
@@ -1839,7 +1963,7 @@ export default class SearchBar extends Extension {
             appAction: "new-window",
             shellApp: actionApp,
             _source: "appAction",
-            _matchScore: matchScore,
+            _relevanceScore: matchScore,
             _contextBoost: 0,
           });
         }
@@ -1857,7 +1981,7 @@ export default class SearchBar extends Extension {
         appAction: "launch",
         shellApp: actionApp,
         _source: "app",
-        _matchScore: matchScore,
+        _relevanceScore: matchScore,
         _contextBoost: contextBoost,
       }];
     });
@@ -1869,8 +1993,8 @@ export default class SearchBar extends Extension {
 
     return results.filter((result) => {
       if (result.type === "app") {
-        const identity = result.appIdentity ?? result.appId;
-        const key = `${identity}\u001f${result.appAction ?? "launch"}`;
+        const identity = this._getResultAppIdentity(result);
+        const key = `${identity}\u001f${this._getResultAppAction(result)}`;
         if (seenAppActions.has(key)) return false;
 
         seenAppActions.add(key);
@@ -1885,33 +2009,8 @@ export default class SearchBar extends Extension {
     });
   }
 
-  _searchWindows(text) {
-    const windows = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null);
-    const activeWorkspace = global.workspace_manager.get_active_workspace();
-    const targetMonitor =
-      this._activeMonitorIndex ?? this._getTargetMonitorIndex();
-    const windowData = windows.map((window, mruIndex) => {
-      const title = window.get_title()?.trim() ?? "";
-      const app = this._windowTracker.get_window_app(window);
-      const appName = app?.get_name()?.trim() ?? "";
-      const appId = app?.get_id() ?? null;
-      const appIdentity = this._getShellAppIdentity(app);
-      const label = title || appName || "Untitled window";
-      const appKey =
-        appIdentity || appId || normalizeSearchText(appName) || "unknown";
-
-      return {
-        window,
-        mruIndex,
-        title,
-        app,
-        appName,
-        appId,
-        appIdentity,
-        label,
-        duplicateKey: `${appKey}\u001f${normalizeSearchText(label)}`,
-      };
-    });
+  _searchWindows(text, windowContext) {
+    const { activeWorkspace, targetMonitor, windowData } = windowContext;
     const duplicateCounts = new Map();
     const duplicateIndexes = new Map();
     const launchableAppIdentities = new Set(
@@ -1936,21 +2035,22 @@ export default class SearchBar extends Extension {
           appId,
           appIdentity,
           label,
+          workspace,
+          monitorIndex,
           duplicateKey,
         } = data;
-        const titleScore = this._scoreSearchMatch(title, text);
-        const appScore = this._scoreSearchMatch(appName, text);
+        const titleScore = scoreSearchMatch(title, text);
+        const appScore = scoreSearchMatch(appName, text);
         let contextBoost = Math.max(0, 24 - mruIndex * 3);
 
         if (appScore >= 0 && launchableAppIdentities.has(appIdentity)) {
           return null;
         }
 
-        if (window.get_workspace() === activeWorkspace) contextBoost += 45;
-        if (window.get_monitor() === targetMonitor) contextBoost += 20;
+        if (workspace === activeWorkspace) contextBoost += 45;
+        if (monitorIndex === targetMonitor) contextBoost += 20;
 
         const locationParts = [];
-        const workspace = window.get_workspace();
         if (workspace === activeWorkspace) {
           locationParts.push("Current workspace");
         } else if (workspace) {
@@ -1958,7 +2058,7 @@ export default class SearchBar extends Extension {
         }
 
         if ((Main.layoutManager.monitors?.length ?? 0) > 1) {
-          locationParts.push(`Monitor ${window.get_monitor() + 1}`);
+          locationParts.push(`Monitor ${monitorIndex + 1}`);
         }
 
         const duplicateCount = duplicateCounts.get(duplicateKey) ?? 1;
@@ -1989,19 +2089,21 @@ export default class SearchBar extends Extension {
           appId,
           appIdentity,
           _source: "window",
-          _matchScore: Math.max(
+          _relevanceScore: Math.max(
             titleScore,
             appScore < 0 ? -1 : appScore - 35,
           ),
           _contextBoost: contextBoost,
         };
       })
-      .filter((window) => window && window._matchScore >= 0);
+      .filter((window) => window && window._relevanceScore >= 0);
   }
 
   _searchSystemCommands(text) {
-    const query = text.toLowerCase();
-    const systemActions = SystemActions.getDefault();
+    const systemActions = this._systemActions;
+    const folderCommands = (this._folderCache ?? []).flatMap(
+      ({ actionCommand }) => (actionCommand ? [actionCommand] : []),
+    );
     const commands = [
       {
         label: "Shut Down",
@@ -2068,30 +2170,7 @@ export default class SearchBar extends Extension {
         icon: "audio-volume-high-symbolic",
         keywords: ["sound", "audio", "volume settings"],
       },
-      {
-        label: "Open Downloads",
-        uri: Gio.File.new_for_path(
-          GLib.build_filenamev([GLib.get_home_dir(), "Downloads"]),
-        ).get_uri(),
-        icon: "folder-download-symbolic",
-        keywords: ["downloads", "download folder"],
-      },
-      {
-        label: "Open Documents",
-        uri: Gio.File.new_for_path(
-          GLib.build_filenamev([GLib.get_home_dir(), "Documents"]),
-        ).get_uri(),
-        icon: "folder-documents-symbolic",
-        keywords: ["documents", "docs", "document folder"],
-      },
-      {
-        label: "Open Pictures",
-        uri: Gio.File.new_for_path(
-          GLib.build_filenamev([GLib.get_home_dir(), "Pictures"]),
-        ).get_uri(),
-        icon: "folder-pictures-symbolic",
-        keywords: ["pictures", "photos", "images"],
-      },
+      ...folderCommands,
       {
         label: "Take Screenshot",
         systemAction: "screenshot",
@@ -2102,10 +2181,10 @@ export default class SearchBar extends Extension {
     return commands
       .filter((command) => command.available ?? true)
       .map((c, index) => {
-        const labelScore = this._scoreSearchMatch(c.label, query);
-        const keywordScore = this._scoreSearchMatch(
+        const labelScore = scoreSearchMatch(c.label, text);
+        const keywordScore = scoreSearchMatch(
           (c.keywords ?? []).join(" "),
-          query,
+          text,
         );
         const result = {
           type: "system",
@@ -2138,7 +2217,7 @@ export default class SearchBar extends Extension {
   _runSystemAction(result) {
     try {
       if (result.systemAction) {
-        const systemActions = SystemActions.getDefault();
+        const systemActions = this._systemActions;
 
         switch (result.systemAction) {
           case "power-off":
@@ -2164,7 +2243,7 @@ export default class SearchBar extends Extension {
       }
 
       if (result.uri) {
-        Gio.AppInfo.launch_default_for_uri(result.uri, null);
+        this._openUri(result.uri);
         return;
       }
 
@@ -2182,7 +2261,7 @@ export default class SearchBar extends Extension {
     }
   }
 
-  async _searchFiles(text, cancellable = null) {
+  _searchFiles(text, cancellable = null) {
     return new Promise((resolve) => {
       try {
         const binary =
@@ -2264,27 +2343,37 @@ export default class SearchBar extends Extension {
 
   // --- Web Fetches ---
 
-  async _fetchWeather(text, generation = null, cancellable = null) {
-    const match = text
-      .trim()
-      .match(
-        /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+(.+)$/i,
-      );
-    if (!match) return;
-    const query = match[1].trim();
+  async _fetchJson(url, cancellable) {
+    const bytes = await this._session.send_and_read_async(
+      Soup.Message.new("GET", url),
+      GLib.PRIORITY_DEFAULT,
+      cancellable,
+    );
+    return JSON.parse(new TextDecoder().decode(bytes.get_data()));
+  }
 
+  _showRemoteError(text, generation, cancellable, message) {
+    if (
+      this._isCurrentQuery(text, generation) &&
+      !cancellable?.is_cancelled()
+    ) {
+      this._showStatus("error", message);
+    }
+  }
+
+  async _fetchWeather(
+    text,
+    query,
+    generation = null,
+    cancellable = null,
+  ) {
     try {
       // Step 1: Resolve the city name to coordinates
       const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json`;
-      const geoBytes = await this._session.send_and_read_async(
-        Soup.Message.new("GET", geoUrl),
-        GLib.PRIORITY_DEFAULT,
-        cancellable,
-      );
+      const geoData = await this._fetchJson(geoUrl, cancellable);
 
       if (!this._isCurrentQuery(text, generation)) return;
 
-      const geoData = JSON.parse(new TextDecoder().decode(geoBytes.get_data()));
       if (!geoData.results?.length) {
         this._showNoResults(text);
         return;
@@ -2302,15 +2391,10 @@ export default class SearchBar extends Extension {
         `&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m` +
         `&daily=temperature_2m_max,temperature_2m_min` +
         `&timezone=auto&forecast_days=1`;
-      const weatherBytes = await this._session.send_and_read_async(
-        Soup.Message.new("GET", weatherUrl),
-        GLib.PRIORITY_DEFAULT,
-        cancellable,
-      );
+      const w = await this._fetchJson(weatherUrl, cancellable);
 
       if (!this._isCurrentQuery(text, generation)) return;
 
-      const w = JSON.parse(new TextDecoder().decode(weatherBytes.get_data()));
       const c = w.current;
       const d = w.daily;
       const code = c.weather_code;
@@ -2331,12 +2415,12 @@ export default class SearchBar extends Extension {
         },
       ]);
     } catch (_e) {
-      if (
-        this._isCurrentQuery(text, generation) &&
-        !cancellable?.is_cancelled()
-      ) {
-        this._showStatus("error", "Weather is unavailable right now");
-      }
+      this._showRemoteError(
+        text,
+        generation,
+        cancellable,
+        "Weather is unavailable right now",
+      );
     }
   }
 
@@ -2385,22 +2469,18 @@ export default class SearchBar extends Extension {
     return map[code] ?? "Unknown";
   }
 
-  async _fetchDictionary(text, generation = null, cancellable = null) {
-    const match = text.trim().match(/^def(?:ine)?\s+(.+)$/i);
-    if (!match) return;
-    const word = match[1];
-
+  async _fetchDictionary(
+    text,
+    word,
+    generation = null,
+    cancellable = null,
+  ) {
     try {
       const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`;
-      const bytes = await this._session.send_and_read_async(
-        Soup.Message.new("GET", url),
-        GLib.PRIORITY_DEFAULT,
-        cancellable,
-      );
+      const data = await this._fetchJson(url, cancellable);
 
       if (!this._isCurrentQuery(text, generation)) return;
 
-      const data = JSON.parse(new TextDecoder().decode(bytes.get_data()));
       if (data?.length > 0) {
         const meaning = data[0].meanings[0].definitions[0].definition;
         this._showResults([
@@ -2417,35 +2497,22 @@ export default class SearchBar extends Extension {
         this._showNoResults(text);
       }
     } catch (_e) {
-      if (
-        this._isCurrentQuery(text, generation) &&
-        !cancellable?.is_cancelled()
-      ) {
-        this._showStatus("error", "Dictionary is unavailable right now");
-      }
+      this._showRemoteError(
+        text,
+        generation,
+        cancellable,
+        "Dictionary is unavailable right now",
+      );
     }
   }
 
-  _isCurrencyExpression(text) {
-    return /^\d+(\.\d+)?\s*[a-zA-Z]+\s+to\s+[a-zA-Z]+$/i.test(text.trim());
-  }
-
-  async _fetchCurrency(text, generation = null, cancellable = null) {
-    const commonNames = {
-      yen: "JPY",
-      euro: "EUR",
-      euros: "EUR",
-      dollar: "USD",
-      dollars: "USD",
-      pound: "GBP",
-      pounds: "GBP",
-      rupee: "INR",
-    };
-
-    const parts = text.trim().toLowerCase().split(/\s+/);
-    const amount = parts[0];
-    const from = commonNames[parts[1]] || parts[1].toUpperCase();
-    const to = commonNames[parts[3]] || parts[3].toUpperCase();
+  async _fetchCurrency(
+    text,
+    conversion,
+    generation = null,
+    cancellable = null,
+  ) {
+    const { amount, from, to } = conversion;
 
     if (from.length !== 3 || to.length !== 3) {
       if (this._isCurrentQuery(text, generation)) this._showNoResults(text);
@@ -2454,15 +2521,10 @@ export default class SearchBar extends Extension {
 
     try {
       const url = `https://api.frankfurter.app/latest?amount=${amount}&from=${from}&to=${to}`;
-      const bytes = await this._session.send_and_read_async(
-        Soup.Message.new("GET", url),
-        GLib.PRIORITY_DEFAULT,
-        cancellable,
-      );
+      const data = await this._fetchJson(url, cancellable);
 
       if (!this._isCurrentQuery(text, generation)) return;
 
-      const data = JSON.parse(new TextDecoder().decode(bytes.get_data()));
       if (data.rates?.[to] !== undefined) {
         this._showResults([
           {
@@ -2478,12 +2540,12 @@ export default class SearchBar extends Extension {
         this._showNoResults(text);
       }
     } catch (_e) {
-      if (
-        this._isCurrentQuery(text, generation) &&
-        !cancellable?.is_cancelled()
-      ) {
-        this._showStatus("error", "Currency conversion is unavailable");
-      }
+      this._showRemoteError(
+        text,
+        generation,
+        cancellable,
+        "Currency conversion is unavailable",
+      );
     }
   }
 
@@ -2495,10 +2557,6 @@ export default class SearchBar extends Extension {
     );
   }
 
-  _evaluate(expr) {
-    return evaluateMathExpression(expr);
-  }
-
   // --- Results ---
 
   _resultsMatch(first, second) {
@@ -2507,10 +2565,10 @@ export default class SearchBar extends Extension {
     switch (first.type) {
       case "app":
         return (
-          (first.appIdentity ?? first.appId) ===
-            (second.appIdentity ?? second.appId) &&
-          (first.appAction ?? "launch") ===
-            (second.appAction ?? "launch")
+          this._getResultAppIdentity(first) ===
+            this._getResultAppIdentity(second) &&
+          this._getResultAppAction(first) ===
+            this._getResultAppAction(second)
         );
       case "window":
         return first.window === second.window;
@@ -2573,27 +2631,21 @@ export default class SearchBar extends Extension {
           x_expand: true,
           y_align: Clutter.ActorAlign.CENTER,
         });
-        const cityLabel = new St.Label({
+        const cityLabel = this._createSingleLineLabel({
           text: result.city,
           style_class: "weather-city",
           x_expand: true,
         });
-        cityLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-        cityLabel.clutter_text.set_single_line_mode(true);
-        const descriptionLabel = new St.Label({
+        const descriptionLabel = this._createSingleLineLabel({
           text: result.description,
           style_class: "weather-desc",
           x_expand: true,
         });
-        descriptionLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-        descriptionLabel.clutter_text.set_single_line_mode(true);
-        const detailsLabel = new St.Label({
+        const detailsLabel = this._createSingleLineLabel({
           text: result.details,
           style_class: "weather-details",
           x_expand: true,
         });
-        detailsLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-        detailsLabel.clutter_text.set_single_line_mode(true);
         infoBox.add_child(cityLabel);
         infoBox.add_child(descriptionLabel);
         infoBox.add_child(detailsLabel);
@@ -2632,33 +2684,25 @@ export default class SearchBar extends Extension {
           style_class: "spotlight-result-text",
         });
         if (result.answerContext) {
-          const contextLabel = new St.Label({
+          const contextLabel = this._createSingleLineLabel({
             text: result.answerContext,
             style_class: "spotlight-answer-context",
             x_expand: true,
           });
-          contextLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-          contextLabel.clutter_text.set_single_line_mode(true);
           answerText.add_child(contextLabel);
         }
-        const answerValueLabel = new St.Label({
+        const answerValueLabel = this._createSingleLineLabel({
           text: result.label,
           style_class: "spotlight-result-label",
           x_expand: true,
         });
-        answerValueLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-        answerValueLabel.clutter_text.set_single_line_mode(true);
         answerText.add_child(answerValueLabel);
         if (result.subtitle) {
-          const answerSubtitleLabel = new St.Label({
+          const answerSubtitleLabel = this._createSingleLineLabel({
             text: result.subtitle,
             style_class: "spotlight-result-subtitle",
             x_expand: true,
           });
-          answerSubtitleLabel.clutter_text.set_ellipsize(
-            Pango.EllipsizeMode.END,
-          );
-          answerSubtitleLabel.clutter_text.set_single_line_mode(true);
           answerText.add_child(answerSubtitleLabel);
         }
         answerBox.add_child(answerText);
@@ -2677,23 +2721,19 @@ export default class SearchBar extends Extension {
           y_align: Clutter.ActorAlign.CENTER,
           style_class: "spotlight-result-text",
         });
-        const titleLabel = new St.Label({
+        const titleLabel = this._createSingleLineLabel({
           text: result.label,
           style_class: "spotlight-result-label",
           x_expand: true,
         });
-        titleLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-        titleLabel.clutter_text.set_single_line_mode(true);
         textBox.add_child(titleLabel);
 
         if (result.subtitle) {
-          const subtitleLabel = new St.Label({
+          const subtitleLabel = this._createSingleLineLabel({
             text: result.subtitle,
             style_class: "spotlight-result-subtitle",
             x_expand: true,
           });
-          subtitleLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-          subtitleLabel.clutter_text.set_single_line_mode(true);
           textBox.add_child(subtitleLabel);
         }
 
@@ -2701,13 +2741,11 @@ export default class SearchBar extends Extension {
 
         const metadata = this._getResultMetadata(result);
         if (metadata) {
-          const metadataLabel = new St.Label({
+          const metadataLabel = this._createSingleLineLabel({
             text: metadata,
             style_class: "spotlight-result-metadata",
             y_align: Clutter.ActorAlign.CENTER,
           });
-          metadataLabel.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
-          metadataLabel.clutter_text.set_single_line_mode(true);
           this._resultMetadataActors.push(metadataLabel);
           rowBox.add_child(metadataLabel);
         }
@@ -2761,6 +2799,13 @@ export default class SearchBar extends Extension {
       row.get_child()?.destroy();
       row._superbarType = null;
     });
+  }
+
+  _createSingleLineLabel(properties) {
+    const label = new St.Label(properties);
+    label.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+    label.clutter_text.set_single_line_mode(true);
+    return label;
   }
 
   _createResultIcon(result) {
@@ -2843,6 +2888,22 @@ export default class SearchBar extends Extension {
     this._statusBox?.hide();
   }
 
+  _activateWindow(window) {
+    const timestamp = global.get_current_time();
+    const shellApp = this._windowTracker.get_window_app(window);
+
+    if (shellApp?.activate_window) {
+      shellApp.activate_window(window, timestamp);
+    } else {
+      window.get_workspace()?.activate(timestamp);
+      window.activate(timestamp);
+    }
+  }
+
+  _openUri(uri) {
+    Gio.AppInfo.launch_default_for_uri(uri, null);
+  }
+
   _activateResult(index) {
     const result = this._results[index];
     if (!result) return;
@@ -2856,7 +2917,7 @@ export default class SearchBar extends Extension {
       try {
         const shellApp =
           result.shellApp ??
-          Shell.AppSystem.get_default().lookup_app(result.appId);
+          this._appSystem.lookup_app(result.appId);
         if (result.appAction === "new-window") {
           if (!shellApp?.open_new_window) {
             throw new Error("Application cannot open a new window");
@@ -2865,15 +2926,7 @@ export default class SearchBar extends Extension {
         } else if (result.appAction === "activate" && result.activateWindow) {
           // Raise the matched window directly. shellApp.activate() would open a
           // new instance for apps GNOME hasn't associated with their windows.
-          const window = result.activateWindow;
-          const timestamp = global.get_current_time();
-          const windowApp = this._windowTracker.get_window_app(window);
-          if (windowApp?.activate_window) {
-            windowApp.activate_window(window, timestamp);
-          } else {
-            window.get_workspace()?.activate(timestamp);
-            window.activate(timestamp);
-          }
+          this._activateWindow(result.activateWindow);
         } else if (shellApp) {
           shellApp.activate();
         } else {
@@ -2883,34 +2936,19 @@ export default class SearchBar extends Extension {
       } catch (e) {
         console.error(`[Superbar] Failed to launch app: ${e}`);
       }
-    } else if (result.type === "calc") {
-      St.Clipboard.get_default().set_text(
-        St.ClipboardType.CLIPBOARD,
-        result.value,
-      );
-    } else if (result.type === "clipboard") {
+    } else if (result.type === "calc" || result.type === "clipboard") {
       this._clipboard.set_text(St.ClipboardType.CLIPBOARD, result.value);
-    } else if (result.type === "weather") {
-      Gio.AppInfo.launch_default_for_uri(result.uri, null);
+    } else if (result.type === "weather" || result.type === "file") {
+      this._openUri(result.uri);
     } else if (result.type === "web") {
       const uri =
         result.uri ??
         `https://www.google.com/search?q=${encodeURIComponent(result.query)}`;
-      Gio.AppInfo.launch_default_for_uri(uri, null);
+      this._openUri(uri);
     } else if (result.type === "system") {
       this._runSystemAction(result);
     } else if (result.type === "window") {
-      const timestamp = global.get_current_time();
-      const shellApp = this._windowTracker.get_window_app(result.window);
-
-      if (shellApp?.activate_window) {
-        shellApp.activate_window(result.window, timestamp);
-      } else {
-        result.window.get_workspace()?.activate(timestamp);
-        result.window.activate(timestamp);
-      }
-    } else if (result.type === "file") {
-      Gio.AppInfo.launch_default_for_uri(result.uri, null);
+      this._activateWindow(result.window);
     }
   }
 
@@ -2964,16 +3002,7 @@ export default class SearchBar extends Extension {
   }
 
   _getResultsMaxHeight() {
-    const monitors = Main.layoutManager.monitors ?? [];
-    let monitorIndex = this._activeMonitorIndex;
-    if (
-      !Number.isInteger(monitorIndex) ||
-      monitorIndex < 0 ||
-      monitorIndex >= monitors.length
-    ) {
-      monitorIndex = this._getTargetMonitorIndex();
-    }
-
+    const monitorIndex = this._resolveActiveMonitorIndex();
     const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
     if (!workArea) return 450;
 
@@ -3048,6 +3077,12 @@ export default class SearchBar extends Extension {
 
   // --- Layout ---
 
+  _isValidMonitorIndex(index, monitors = Main.layoutManager.monitors ?? []) {
+    return (
+      Number.isInteger(index) && index >= 0 && index < monitors.length
+    );
+  }
+
   _getTargetMonitorIndex() {
     const monitors = Main.layoutManager.monitors ?? [];
     if (monitors.length === 0) return 0;
@@ -3060,11 +3095,21 @@ export default class SearchBar extends Extension {
     ];
 
     return (
-      candidateIndices.find(
-        (index) =>
-          Number.isInteger(index) && index >= 0 && index < monitors.length,
+      candidateIndices.find((index) =>
+        this._isValidMonitorIndex(index, monitors),
       ) ?? 0
     );
+  }
+
+  _resolveActiveMonitorIndex() {
+    const monitors = Main.layoutManager.monitors ?? [];
+    const monitorIndex = this._activeMonitorIndex;
+
+    if (this._isValidMonitorIndex(monitorIndex, monitors)) {
+      return monitorIndex;
+    }
+
+    return this._getTargetMonitorIndex();
   }
 
   _onMonitorConfigurationChanged() {
@@ -3089,14 +3134,7 @@ export default class SearchBar extends Extension {
     const monitors = Main.layoutManager.monitors ?? [];
     if (monitors.length === 0) return;
 
-    let monitorIndex = this._activeMonitorIndex;
-    if (
-      !Number.isInteger(monitorIndex) ||
-      monitorIndex < 0 ||
-      monitorIndex >= monitors.length
-    ) {
-      monitorIndex = this._getTargetMonitorIndex();
-    }
+    const monitorIndex = this._resolveActiveMonitorIndex();
     this._activeMonitorIndex = monitorIndex;
 
     const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
@@ -3164,7 +3202,8 @@ export default class SearchBar extends Extension {
       // Main.getStyleVariant() reflects the shell chrome, not the system
       // color-scheme, so it can't be trusted for this decision.
       styleVariant =
-        St.Settings.get().color_scheme === St.SystemColorScheme.PREFER_DARK
+        this._shellSettings.color_scheme ===
+        St.SystemColorScheme.PREFER_DARK
           ? "dark"
           : "light";
     }
@@ -3178,8 +3217,7 @@ export default class SearchBar extends Extension {
     if (this._blurEffect) {
       this._blurEffect.brightness = styleVariant === "dark" ? 0.78 : 1.0;
       this._blurEffect.radius =
-        BACKGROUND_BLUR_RADIUS *
-        St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        BACKGROUND_BLUR_RADIUS * this._themeContext.scale_factor;
     }
 
     this._applySystemTextColor(styleVariant);
