@@ -1335,6 +1335,8 @@ export default class SearchBar extends Extension {
   }
 
   _scheduleCurrentQuery(text, generation, delay, callback) {
+    this._removeSource("_searchTimeout");
+
     this._searchTimeout = GLib.timeout_add(
       GLib.PRIORITY_DEFAULT,
       delay,
