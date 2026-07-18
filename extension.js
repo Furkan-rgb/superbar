@@ -23,7 +23,7 @@ const OPEN_ANIMATION_MS = 250;
 const OPEN_TRANSLATION_Y = -10;
 const OPEN_SCALE = 0.985;
 const SURFACE_COLORS = {
-  light: [240, 245, 248],
+  light: [245, 245, 244],
   dark: [23, 23, 23],
 };
 const STRONG_LOCAL_MATCH_SCORE = 600;

@@ -107,9 +107,10 @@ Wayland session, log out and back in instead of restarting GNOME Shell in place.
 ## Design and implementation notes
 
 Superbar uses a restrained, high-contrast material adapted to GNOME Shell. Its
-light surface and neutral charcoal dark surface keep text, icons, and results
-readable without GNOME Shell's rectangular background blur. Background opacity
-is adjustable from 65–100% in Appearance settings and defaults to 94%.
+soft neutral off-white light surface and charcoal dark surface keep text, icons,
+and results readable without GNOME Shell's rectangular background blur.
+Background opacity is adjustable from 65–100% in Appearance settings and
+defaults to 90%.
 
 Ordinary searches remain one unified, adaptively ranked list; the redesign does
 not add category tabs or source filters. The non-interactive mode indicator is

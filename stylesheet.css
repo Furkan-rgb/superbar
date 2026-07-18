@@ -8,7 +8,7 @@
 
 .spotlight-container {
     border-radius: 28px;
-    color: rgba(20, 28, 39, 0.93);
+    color: rgba(28, 28, 28, 0.94);
 }
 
 .spotlight-material,
@@ -18,9 +18,9 @@
 }
 
 .spotlight-material {
-    background-color: rgba(240, 245, 248, 0.94);
+    background-color: rgba(245, 245, 244, 0.90);
     border: 1px solid rgba(255, 255, 255, 0.72);
-    box-shadow: 0 18px 52px rgba(0, 22, 45, 0.18);
+    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.18);
 }
 
 .spotlight-highlight {
@@ -45,7 +45,7 @@
 
 .spotlight-icon {
     icon-size: 20px;
-    color: rgba(25, 38, 53, 0.58);
+    color: rgba(38, 38, 38, 0.62);
 }
 
 .spotlight-entry,
@@ -55,17 +55,17 @@
     border-radius: 0;
     background-color: transparent;
     box-shadow: none;
-    color: rgba(20, 28, 39, 0.93);
+    color: rgba(28, 28, 28, 0.94);
     caret-color: rgba(0, 104, 225, 0.94);
     caret-size: 2px;
     selection-background-color: rgba(71, 153, 225, 0.22);
-    selected-color: rgba(20, 28, 39, 0.96);
+    selected-color: rgba(28, 28, 28, 0.96);
     font-size: 24px;
     font-weight: 300;
 }
 
 .spotlight-entry StLabel.hint-text {
-    color: rgba(31, 42, 56, 0.37);
+    color: rgba(38, 38, 38, 0.48);
 }
 
 .spotlight-mode-indicator {
@@ -91,14 +91,14 @@
 }
 
 .spotlight-mode-label {
-    color: rgba(24, 36, 50, 0.61);
+    color: rgba(38, 38, 38, 0.68);
     font-size: 12px;
     font-weight: 500;
 }
 
 .spotlight-divider {
     height: 1px;
-    background-color: rgba(31, 49, 66, 0.10);
+    background-color: rgba(38, 38, 38, 0.12);
 }
 
 /* ---------------------------------------------------------------------
@@ -118,7 +118,7 @@
 .spotlight-status {
     padding: 40px 20px;
     spacing: 10px;
-    color: rgba(26, 38, 52, 0.54);
+    color: rgba(38, 38, 38, 0.64);
 }
 
 .spotlight-status.loading {
@@ -132,7 +132,7 @@
 }
 
 .spotlight-status-label {
-    color: rgba(26, 38, 52, 0.54);
+    color: rgba(38, 38, 38, 0.64);
     font-size: 15px;
     font-weight: 400;
 }
@@ -147,12 +147,12 @@
     min-width: 6px;
     border: none;
     border-radius: 999px;
-    background-color: rgba(30, 51, 70, 0.16);
+    background-color: rgba(38, 38, 38, 0.18);
 }
 
 .spotlight-results-scroll StScrollBar .vhandle:hover,
 .spotlight-results-scroll StScrollBar .v-handle:hover {
-    background-color: rgba(30, 51, 70, 0.24);
+    background-color: rgba(38, 38, 38, 0.28);
 }
 
 /* ---------------------------------------------------------------------
@@ -167,16 +167,16 @@
     border: 1px solid transparent;
     border-radius: 12px;
     background-color: transparent;
-    color: rgba(20, 28, 39, 0.93);
+    color: rgba(28, 28, 28, 0.94);
     transition-duration: 150ms;
 }
 
 .spotlight-result-row:hover {
-    background-color: rgba(42, 72, 102, 0.055);
+    background-color: rgba(38, 38, 38, 0.055);
 }
 
 .spotlight-result-row:active {
-    background-color: rgba(42, 72, 102, 0.085);
+    background-color: rgba(38, 38, 38, 0.085);
 }
 
 .spotlight-result-row-content,
@@ -201,7 +201,7 @@
     border-radius: 12px;
     background-color: rgba(69, 130, 190, 0.88);
     color: rgba(255, 255, 255, 0.98);
-    box-shadow: 0 3px 10px rgba(13, 44, 71, 0.09);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.10);
 }
 
 .spotlight-result-icon {
@@ -238,20 +238,20 @@
 }
 
 .spotlight-result-label {
-    color: rgba(20, 28, 39, 0.93);
+    color: rgba(28, 28, 28, 0.94);
     font-size: 16px;
     font-weight: 500;
 }
 
 .spotlight-result-subtitle {
-    color: rgba(26, 38, 52, 0.54);
+    color: rgba(38, 38, 38, 0.64);
     font-size: 13px;
     font-weight: 400;
 }
 
 .spotlight-result-metadata {
     margin-left: 14px;
-    color: rgba(26, 38, 52, 0.38);
+    color: rgba(38, 38, 38, 0.65);
     font-size: 12px;
     font-weight: 500;
 }
@@ -263,7 +263,7 @@
     border: none;
     border-radius: 7px;
     background-color: transparent;
-    color: rgba(26, 38, 52, 0.38);
+    color: rgba(38, 38, 38, 0.65);
     font-size: 12px;
     font-weight: 500;
     transition-duration: 120ms;
@@ -302,19 +302,19 @@
 }
 
 .spotlight-answer-context {
-    color: rgba(26, 38, 52, 0.54);
+    color: rgba(38, 38, 38, 0.64);
     font-size: 13px;
     font-weight: 400;
 }
 
 .spotlight-result-row.answer .spotlight-result-label {
-    color: rgba(20, 28, 39, 0.93);
+    color: rgba(28, 28, 28, 0.94);
     font-size: 32px;
     font-weight: 400;
 }
 
 .spotlight-result-row.answer .spotlight-result-subtitle {
-    color: rgba(26, 38, 52, 0.38);
+    color: rgba(38, 38, 38, 0.65);
     font-size: 12px;
 }
 
@@ -341,26 +341,26 @@
 
 .weather-temp {
     margin-left: 14px;
-    color: rgba(20, 28, 39, 0.93);
+    color: rgba(28, 28, 28, 0.94);
     font-size: 34px;
     font-weight: 300;
 }
 
 .weather-desc {
-    color: rgba(26, 38, 52, 0.54);
+    color: rgba(38, 38, 38, 0.64);
     font-size: 13px;
     font-weight: 400;
 }
 
 .weather-city {
-    color: rgba(20, 28, 39, 0.93);
+    color: rgba(28, 28, 28, 0.94);
     font-size: 16px;
     font-weight: 500;
 }
 
 .weather-details {
     margin-top: 3px;
-    color: rgba(26, 38, 52, 0.54);
+    color: rgba(38, 38, 38, 0.64);
     font-size: 13px;
     font-weight: 400;
 }
@@ -374,22 +374,22 @@
     min-height: 21px;
     padding: 6px 14px 7px;
     spacing: 18px;
-    color: rgba(27, 40, 55, 0.36);
+    color: rgba(38, 38, 38, 0.58);
 }
 
 .spotlight-actions-hint {
     spacing: 6px;
-    color: rgba(26, 40, 56, 0.47);
+    color: rgba(38, 38, 38, 0.62);
 }
 
 .spotlight-footer-key {
     min-width: 8px;
     min-height: 16px;
     padding: 0 5px;
-    border: 1px solid rgba(31, 49, 66, 0.08);
+    border: 1px solid rgba(38, 38, 38, 0.10);
     border-radius: 5px;
     background-color: rgba(255, 255, 255, 0.58);
-    color: rgba(20, 32, 47, 0.50);
+    color: rgba(38, 38, 38, 0.66);
     font-size: 11px;
     font-weight: 500;
 }
@@ -399,10 +399,11 @@
     border-color: rgba(74, 158, 226, 0.10);
     background-color: rgba(74, 158, 226, 0.09);
     color: rgba(20, 72, 120, 0.66);
+    text-align: center;
 }
 
 .spotlight-footer-label {
-    color: rgba(27, 40, 55, 0.36);
+    color: rgba(38, 38, 38, 0.58);
     font-size: 11px;
     font-weight: 500;
 }
@@ -424,7 +425,7 @@
 }
 
 .dark-mode .spotlight-material {
-    background-color: rgba(23, 23, 23, 0.94);
+    background-color: rgba(23, 23, 23, 0.90);
     border-color: rgba(255, 255, 255, 0.11);
     box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
 }

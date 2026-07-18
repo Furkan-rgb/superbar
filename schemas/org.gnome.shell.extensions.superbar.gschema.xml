@@ -55,7 +55,7 @@
       <description>Color theme for Superbar: system, light, or dark.</description>
     </key>
     <key name="background-opacity" type="i">
-      <default>94</default>
+      <default>90</default>
       <range min="65" max="100"/>
       <summary>Background Opacity</summary>
       <description>Opacity percentage of the Superbar background surface.</description>
