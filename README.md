@@ -90,17 +90,21 @@ destination when needed with `make DESKTOP_DIR=/path/to/output export`.
 
 ### UI showcase renders
 
-Run `make renders` to generate consistent 858×649 PNG illustrations in
-`renders/`. The showcase mirrors Superbar's current dimensions, neutral light
-and dark surfaces, result rows, mode indicator, footer, and background opacity.
-It uses local HTML, CSS, vector icons, and headless Chrome/Chromium, so it does
-not need npm packages or network access.
+Run `make renders` to generate consistent high-resolution 1716×1298 PNG
+illustrations in `renders/`. The 2× pixel density is the default while the
+composition remains equivalent to an 858×649 canvas. The showcase mirrors
+Superbar's current dimensions, neutral light and dark surfaces, result rows,
+mode indicator, footer, and background opacity. It uses local HTML, CSS, vector
+icons, and headless Chrome/Chromium, so it does not need npm packages or network
+access.
 
 ```bash
 make renders          # every state
 make renders-light    # only light states
 make renders-dark     # only dark states
+make RENDER_SCALE=3 renders  # 2574×1947 output
 node scripts/render-showcase.mjs --state dark-clipboard-copied
+node scripts/render-showcase.mjs --scale 4 --state dark-weather
 node scripts/render-showcase.mjs --list
 ```
 

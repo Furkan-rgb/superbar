@@ -11,6 +11,8 @@ const require = createRequire(import.meta.url);
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "..");
 const states = require(join(repositoryRoot, "showcase", "states.js"));
+const BASE_WIDTH = 858;
+const BASE_HEIGHT = 649;
 
 function parseArguments(argv) {
   const options = {
@@ -18,6 +20,7 @@ function parseArguments(argv) {
     state: null,
     theme: null,
     chrome: process.env.SUPERBAR_CHROME || null,
+    scale: process.env.SUPERBAR_RENDER_SCALE || "2",
     list: false,
   };
 
@@ -25,7 +28,11 @@ function parseArguments(argv) {
     const argument = argv[index];
     if (argument === "--list") {
       options.list = true;
-    } else if (["--output", "--state", "--theme", "--chrome"].includes(argument)) {
+    } else if (
+      ["--output", "--state", "--theme", "--chrome", "--scale"].includes(
+        argument,
+      )
+    ) {
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) {
         throw new Error(`${argument} requires a value`);
@@ -51,6 +58,7 @@ Options:
   --state NAME    Render one named state
   --theme THEME   Render only light or dark states
   --chrome PATH   Chrome/Chromium executable
+  --scale NUMBER  Pixel density from 1–4 (default: 2)
   --list          List the available states
   -h, --help      Show this help
 
@@ -108,7 +116,15 @@ function selectStates(options) {
   });
 }
 
-function renderState(chrome, profileDirectory, outputDirectory, name) {
+function parseScale(value) {
+  const scale = Number(value);
+  if (!Number.isInteger(scale) || scale < 1 || scale > 4) {
+    throw new Error("--scale must be a whole number from 1 to 4");
+  }
+  return scale;
+}
+
+function renderState(chrome, profileDirectory, outputDirectory, name, scale) {
   const outputPath = join(outputDirectory, `${name}.png`);
   const showcaseUrl = new URL(
     pathToFileURL(join(repositoryRoot, "showcase", "index.html")),
@@ -131,10 +147,10 @@ function renderState(chrome, profileDirectory, outputDirectory, name) {
       "--no-default-browser-check",
       "--no-first-run",
       "--allow-file-access-from-files",
-      "--force-device-scale-factor=1",
+      `--force-device-scale-factor=${scale}`,
       "--virtual-time-budget=1000",
       `--user-data-dir=${profileDirectory}`,
-      `--window-size=858,649`,
+      `--window-size=${BASE_WIDTH},${BASE_HEIGHT}`,
       `--screenshot=${outputPath}`,
       showcaseUrl.href,
     ],
@@ -147,9 +163,14 @@ function renderState(chrome, profileDirectory, outputDirectory, name) {
   }
 
   const dimensions = pngDimensions(outputPath);
-  if (dimensions.width !== 858 || dimensions.height !== 649) {
+  const expectedWidth = BASE_WIDTH * scale;
+  const expectedHeight = BASE_HEIGHT * scale;
+  if (
+    dimensions.width !== expectedWidth ||
+    dimensions.height !== expectedHeight
+  ) {
     throw new Error(
-      `${name} rendered at ${dimensions.width}×${dimensions.height}; expected 858×649`,
+      `${name} rendered at ${dimensions.width}×${dimensions.height}; expected ${expectedWidth}×${expectedHeight}`,
     );
   }
 
@@ -174,12 +195,13 @@ try {
   }
 
   const chrome = findChrome(options.chrome);
+  const scale = parseScale(options.scale);
   const outputDirectory = resolve(options.output);
   mkdirSync(outputDirectory, { recursive: true });
   profileDirectory = mkdtempSync(join(tmpdir(), "superbar-render-"));
 
   for (const [name] of selectedStates) {
-    renderState(chrome, profileDirectory, outputDirectory, name);
+    renderState(chrome, profileDirectory, outputDirectory, name, scale);
   }
 
   console.log(`Saved ${selectedStates.length} render(s) to ${outputDirectory}`);

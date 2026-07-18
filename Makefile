@@ -5,6 +5,7 @@ UUID := superbar@Furkan-rgb.github.io
 ARCHIVE := $(UUID).shell-extension.zip
 BUILD_DIR ?= build
 DESKTOP_DIR ?= $(HOME)/Desktop
+RENDER_SCALE ?= 2
 BUILD_ARCHIVE := $(BUILD_DIR)/$(ARCHIVE)
 DESKTOP_ARCHIVE := $(DESKTOP_DIR)/$(ARCHIVE)
 
@@ -90,13 +91,13 @@ nested: install
 	@dbus-run-session gnome-shell --devkit --wayland
 
 renders:
-	@node scripts/render-showcase.mjs
+	@node scripts/render-showcase.mjs --scale "$(RENDER_SCALE)"
 
 renders-light:
-	@node scripts/render-showcase.mjs --theme light
+	@node scripts/render-showcase.mjs --theme light --scale "$(RENDER_SCALE)"
 
 renders-dark:
-	@node scripts/render-showcase.mjs --theme dark
+	@node scripts/render-showcase.mjs --theme dark --scale "$(RENDER_SCALE)"
 
 export: lint verify
 	@mkdir -p "$(DESKTOP_DIR)"
