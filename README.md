@@ -84,44 +84,6 @@ The generated archive is always named
 `superbar@Furkan-rgb.github.io.shell-extension.zip`. `make export` writes it to
 the repository's `build/` directory but does not update the installed extension.
 
-### Rebuilding the screenshots
-
-`make renders` opens the local showcase in headless Chrome or Chromium and
-writes the finished PNGs to `renders/`. The default images are 1716×1298, which
-is twice the size of the 858×649 layout used by the showcase. No npm packages
-or network connection are needed.
-
-```bash
-make renders          # every state
-make renders-light    # only light states
-make renders-dark     # only dark states
-make RENDER_SCALE=3 renders  # 2574×1947 output
-node scripts/render-showcase.mjs --state dark-clipboard-copied
-node scripts/render-showcase.mjs --scale 4 --state dark-weather
-node scripts/render-showcase.mjs --list
-```
-
-The available states cover an empty bar, normal results, bottom positioning,
-clipboard history, the calculator, and weather. If Chrome or Chromium is in an
-unusual location, set `SUPERBAR_CHROME` to its executable. The showcase has its
-own stylesheet, so UI changes may also need to be copied to
-`showcase/styles.css`.
-
-For UI testing, close any older nested Shell and run `make nested`. This builds
-and installs the current source before starting a fresh Shell. Once it opens,
-run these commands from a terminal inside the nested desktop:
-
-```bash
-make enable
-make prefs
-make status
-```
-
-On X11, press **Alt+F2**, enter `r`, then enable the extension. On a regular
-Wayland session, log out and back in instead of restarting GNOME Shell in place.
-
----
-
 ## A few UI details
 
 The default light color is a neutral off-white and the dark color is charcoal.
