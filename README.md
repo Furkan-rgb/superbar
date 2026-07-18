@@ -79,6 +79,7 @@ make help
 make test       # validate, build, and verify the ZIP
 make install    # install the latest local build
 make nested     # install and start a fresh nested GNOME Shell
+make renders    # generate deterministic UI showcase images
 make export     # export the upload-ready ZIP to ~/Desktop; does not install
 ```
 
@@ -86,6 +87,29 @@ The generated archive is always named
 `superbar@Furkan-rgb.github.io.shell-extension.zip`. `make export` writes it to
 the Desktop but does not update the installed extension. Override the export
 destination when needed with `make DESKTOP_DIR=/path/to/output export`.
+
+### UI showcase renders
+
+Run `make renders` to generate consistent 858×649 PNG illustrations in
+`renders/`. The showcase mirrors Superbar's current dimensions, neutral light
+and dark surfaces, result rows, mode indicator, footer, and background opacity.
+It uses local HTML, CSS, vector icons, and headless Chrome/Chromium, so it does
+not need npm packages or network access.
+
+```bash
+make renders          # every state
+make renders-light    # only light states
+make renders-dark     # only dark states
+node scripts/render-showcase.mjs --state dark-clipboard-copied
+node scripts/render-showcase.mjs --list
+```
+
+The rendered states include empty search, general results, clipboard copy and
+copied states, calculator output, and weather. Set `SUPERBAR_CHROME` to the
+Chrome or Chromium executable if it is installed outside the common system
+locations. The renderer is an illustration of the GNOME Shell UI rather than a
+live Shell capture; when the extension's design tokens change, update
+`showcase/styles.css` alongside `stylesheet.css`.
 
 For development, close any existing nested Shell and run `make nested`. This
 packages and installs the current source before starting a fresh Shell process;

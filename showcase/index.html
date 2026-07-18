@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Superbar showcase renderer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="desktop" aria-label="Rendered Superbar showcase">
+      <div class="desktop-grain" aria-hidden="true"></div>
+      <section class="superbar" aria-label="Superbar">
+        <header class="search-row">
+          <span class="search-icon" data-icon="search" aria-hidden="true"></span>
+          <div class="query" aria-label="Search query"></div>
+          <div class="mode-indicator">
+            <span class="mode-dot"></span>
+            <span class="mode-label"></span>
+          </div>
+        </header>
+        <div class="divider results-divider"></div>
+        <div class="results" aria-label="Results"></div>
+        <div class="divider footer-divider"></div>
+        <footer class="footer">
+          <div class="footer-hint actions-hint">
+            <kbd>&gt;</kbd><span>Actions</span>
+          </div>
+          <div class="footer-hints">
+            <div class="footer-hint"><kbd>↑↓</kbd><span>Navigate</span></div>
+            <div class="footer-hint"><kbd>↵</kbd><span>Open</span></div>
+            <div class="footer-hint"><kbd>Esc</kbd><span>Close</span></div>
+          </div>
+        </footer>
+      </section>
+      <p class="render-label"></p>
+    </main>
+    <script src="states.js"></script>
+    <script src="showcase.js"></script>
+  </body>
+</html>

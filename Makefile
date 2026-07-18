@@ -9,7 +9,7 @@ BUILD_ARCHIVE := $(BUILD_DIR)/$(ARCHIVE)
 DESKTOP_ARCHIVE := $(DESKTOP_DIR)/$(ARCHIVE)
 
 .PHONY: help check syntax schema lint pack verify test install enable disable \
-	prefs status nested export release clean
+	prefs status nested renders renders-light renders-dark export release clean
 
 help:
 	@printf "%-12s %s\n" \
@@ -23,6 +23,9 @@ help:
 		"make prefs" "Open Superbar preferences" \
 		"make status" "Show the installed extension state" \
 		"make nested" "Build, install, and start a fresh nested GNOME Shell" \
+		"make renders" "Generate all deterministic showcase PNGs" \
+		"make renders-light" "Generate light-theme showcase PNGs" \
+		"make renders-dark" "Generate dark-theme showcase PNGs" \
 		"make export" "Build/copy the release ZIP only; does not install it" \
 		"make release" "Alias for make export" \
 		"make clean" "Remove generated build files"
@@ -85,6 +88,15 @@ status:
 
 nested: install
 	@dbus-run-session gnome-shell --devkit --wayland
+
+renders:
+	@node scripts/render-showcase.mjs
+
+renders-light:
+	@node scripts/render-showcase.mjs --theme light
+
+renders-dark:
+	@node scripts/render-showcase.mjs --theme dark
 
 export: lint verify
 	@mkdir -p "$(DESKTOP_DIR)"
