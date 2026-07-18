@@ -83,13 +83,12 @@ make test       # validate, build, and verify the ZIP
 make install    # install the latest local build
 make nested     # install and start a fresh nested GNOME Shell
 make renders    # generate deterministic UI showcase images
-make export     # export the upload-ready ZIP to ~/Desktop; does not install
+make export     # export the upload-ready ZIP to build/; does not install
 ```
 
 The generated archive is always named
 `superbar@Furkan-rgb.github.io.shell-extension.zip`. `make export` writes it to
-the Desktop but does not update the installed extension. Override the export
-destination when needed with `make DESKTOP_DIR=/path/to/output export`.
+the repository's `build/` directory but does not update the installed extension.
 
 ### UI showcase renders
 

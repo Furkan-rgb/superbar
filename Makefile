@@ -4,10 +4,8 @@ SHELL := /bin/bash
 UUID := superbar@Furkan-rgb.github.io
 ARCHIVE := $(UUID).shell-extension.zip
 BUILD_DIR ?= build
-DESKTOP_DIR ?= $(HOME)/Desktop
 RENDER_SCALE ?= 2
 BUILD_ARCHIVE := $(BUILD_DIR)/$(ARCHIVE)
-DESKTOP_ARCHIVE := $(DESKTOP_DIR)/$(ARCHIVE)
 
 .PHONY: help check syntax schema lint pack verify test install enable disable \
 	prefs status nested renders renders-light renders-dark export release clean
@@ -27,7 +25,7 @@ help:
 		"make renders" "Generate all deterministic showcase PNGs" \
 		"make renders-light" "Generate light-theme showcase PNGs" \
 		"make renders-dark" "Generate dark-theme showcase PNGs" \
-		"make export" "Build/copy the release ZIP only; does not install it" \
+		"make export" "Build the release ZIP in $(BUILD_DIR)/; does not install it" \
 		"make release" "Alias for make export" \
 		"make clean" "Remove generated build files"
 
@@ -100,10 +98,7 @@ renders-dark:
 	@node scripts/render-showcase.mjs --theme dark --scale "$(RENDER_SCALE)"
 
 export: lint verify
-	@mkdir -p "$(DESKTOP_DIR)"
-	@install -m 0644 "$(BUILD_ARCHIVE)" "$(DESKTOP_ARCHIVE)"
-	@printf "Exported %s\n" "$(DESKTOP_ARCHIVE)"
-	@sha256sum "$(DESKTOP_ARCHIVE)"
+	@printf "Exported %s\n" "$(BUILD_ARCHIVE)"
 
 release: export
 
