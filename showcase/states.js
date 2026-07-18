@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 Furkan
+
 /* Keep this file dependency-free: it is loaded by both the browser showcase
  * and the Node screenshot driver. */
 globalThis.SUPERBAR_SHOWCASE_STATES = {

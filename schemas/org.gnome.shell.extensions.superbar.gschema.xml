@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+SPDX-License-Identifier: GPL-2.0-or-later
+Copyright (C) 2026 Furkan
+-->
 <schemalist>
   <schema id="org.gnome.shell.extensions.superbar" path="/org/gnome/shell/extensions/superbar/">
     <key name="toggle-shortcut" type="as">

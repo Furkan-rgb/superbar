@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 Furkan
+
 import Adw from "gi://Adw";
 import Gtk from "gi://Gtk";
 import Gdk from "gi://Gdk";

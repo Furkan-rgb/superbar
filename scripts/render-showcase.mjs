@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 Furkan
 
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";

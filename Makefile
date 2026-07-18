@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Furkan
+
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
@@ -60,7 +63,7 @@ lint:
 
 pack: check
 	@mkdir -p "$(BUILD_DIR)"
-	@gnome-extensions pack --force --out-dir="$(BUILD_DIR)" .
+	@gnome-extensions pack --force --out-dir="$(BUILD_DIR)" --extra-source=LICENSE .
 	@printf "Built %s\n" "$(BUILD_ARCHIVE)"
 
 verify: pack

@@ -5,7 +5,7 @@ A keyboard-driven, system-wide launcher and command bar for GNOME Shell — insp
 Open it from anywhere with **Alt+Space**.
 
 ![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-49%20%7C%2050-blue)
-![License](https://img.shields.io/badge/license-GPL--2.0-green)
+![License](https://img.shields.io/badge/license-GPL--2.0--or--later-green)
 
 ---
 
@@ -176,6 +176,14 @@ preferences UI also needs inspection.
 
 ---
 
-## License
+## License and credits
 
-GPL-2.0-or-later — see [LICENSE](LICENSE)
+Copyright © 2026 Furkan.
+
+Superbar is licensed under GPL-2.0-or-later — see [LICENSE](LICENSE).
+
+Superbar is built for GNOME Shell and uses GNOME platform APIs. Weather,
+dictionary, and currency features use Open-Meteo (`open-meteo.com`), Free
+Dictionary API (`dictionaryapi.dev`), and Frankfurter (`frankfurter.app`).
+Clipboard history uses GNOME Shell clipboard access and is declared in
+`metadata.json`.

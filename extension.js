@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 Furkan
+
 import { Extension } from "resource:///org/gnome/shell/extensions/extension.js";
 import St from "gi://St";
 import Clutter from "gi://Clutter";
