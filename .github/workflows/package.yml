@@ -57,6 +57,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "build/$ARCHIVE" \
+            --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --generate-notes \
             --title "$GITHUB_REF_NAME"
