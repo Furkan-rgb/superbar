@@ -1,7 +1,8 @@
 # Superbar
 
 A launcher and command bar for GNOME Shell, inspired by macOS Spotlight. Press
-**Alt+Space** and start typing.
+**Alt+Space** by default and start typing. The shortcut can be changed in
+Superbar preferences.
 
 ![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-49%20%7C%2050-blue)
 ![License](https://img.shields.io/badge/license-GPL--2.0--or--later-green)
@@ -27,18 +28,19 @@ A launcher and command bar for GNOME Shell, inspired by macOS Spotlight. Press
 | **Settings Search**       | Find and open panels such as Displays or Color Management              |
 | **GNOME Search Providers** | Include results supplied by Settings, Files, Calendar, and other apps |
 | **Window Switcher**       | Search window titles, including windows on other workspaces            |
-| **File Search**           | Find files in your home directory and common folders                   |
+| **File Search**           | Search common folders and files in the LocalSearch or Tracker index    |
 | **Clipboard History**     | Start with `clip`, `clipboard`, or `history`                            |
 | **Weather**               | Try `weather Amsterdam`                                                 |
-| **Calculator**            | Type an expression such as `2 * (3 + 4)`                               |
-| **Currency Converter**    | `100 USD to EUR`                                                       |
+| **Calculator**            | Type `2 * (3 + 4)`, then press Enter or click the result to copy it     |
+| **Currency Converter**    | Type `100 USD to EUR`, then press Enter or click the result to copy it  |
 | **Dictionary**            | `define word`                                                          |
 | **Web Search**            | Open unmatched searches with your preferred search engine              |
 | **System Actions**        | Start with `>`, `cmd`, `command`, or `action`                          |
-| **Resumable Searches**    | Close and reopen the bar without immediately losing your search        |
-| **Adaptive Ranking**      | Apps and actions you choose can move higher in later searches          |
+| **Resumable Searches**    | Reopen the bar within five minutes to resume your previous search       |
+| **Adaptive Ranking**      | Apps and actions you choose can rank higher; learned ranking is resettable |
 | **Multi-monitor Support** | Opens on the monitor you are currently using                           |
-| **Appearance Settings**   | Pick the theme, colors, opacity, width, and screen position             |
+| **Clipboard Controls**    | Toggle monitoring, set the history limit, or clear saved history       |
+| **Appearance Settings**   | Pick the theme, colors, opacity, width, position, and result count      |
 | **Search Source Controls** | Enable or disable each built-in source from Superbar preferences      |
 
 ---
@@ -74,13 +76,15 @@ then attaches it to a GitHub release.
 
 - GNOME Shell 49 or 50
 - An internet connection for weather, dictionary, and currency features
+- LocalSearch (`localsearch`) or Tracker 3 (`tracker3`) for indexed file
+  results; common-folder results remain available without either command
 
 ## Makefile commands
 
 ```bash
 make help
 make test       # validate, build, and verify the ZIP
-make unit       # test theme and background selection
+make unit       # run all unit tests
 make install    # install the latest local build
 make nested     # install and start a fresh nested GNOME Shell
 make renders    # rebuild the README images
