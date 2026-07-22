@@ -24,6 +24,8 @@ A launcher and command bar for GNOME Shell, inspired by macOS Spotlight. Press
 | Feature                   | How to use                                                             |
 | ------------------------- | ---------------------------------------------------------------------- |
 | **App Launcher**          | Type an app name to launch it or focus it if it is already open        |
+| **Settings Search**       | Find and open panels such as Displays or Color Management              |
+| **GNOME Search Providers** | Include results supplied by Settings, Files, Calendar, and other apps |
 | **Window Switcher**       | Search window titles, including windows on other workspaces            |
 | **File Search**           | Find files in your home directory and common folders                   |
 | **Clipboard History**     | Start with `clip`, `clipboard`, or `history`                            |
@@ -37,6 +39,7 @@ A launcher and command bar for GNOME Shell, inspired by macOS Spotlight. Press
 | **Adaptive Ranking**      | Apps and actions you choose can move higher in later searches          |
 | **Multi-monitor Support** | Opens on the monitor you are currently using                           |
 | **Appearance Settings**   | Pick the theme, colors, opacity, width, and screen position             |
+| **Search Source Controls** | Enable or disable each built-in source from Superbar preferences      |
 
 ---
 
@@ -109,6 +112,14 @@ label beside the search field shows when Superbar has recognized something like
 a clipboard, calculator, weather, dictionary, currency, or system-action query.
 Web searches use Google by default. This can be changed in settings to
 DuckDuckGo, Bing, Brave Search, Ecosia, or Startpage.
+
+Superbar also follows GNOME's enabled app search providers and their configured
+order. Results from providers such as Settings, Files, Calendar, Characters,
+and Software appear in the same result list with their source name. The Search
+Sources preferences page controls Superbar's built-in sources and links to the
+system Search panel for managing app-provided results. Search terms are sent
+over the local session bus to each enabled provider; individual providers may
+use their own local or network-backed search services.
 
 When working on the Shell UI, use a fresh nested session so an older cached copy
 of the extension does not get in the way:

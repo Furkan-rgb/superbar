@@ -99,6 +99,19 @@ function addComboSettingRow(
     settings.set_string(key, optionKeys[row.selected] ?? optionKeys[0]);
   });
   group.add(row);
+  return row;
+}
+
+function addSwitchSettingRow(group, settings, key, title, subtitle) {
+  const row = new Adw.SwitchRow({ title, subtitle });
+  settings.bind(
+    key,
+    row,
+    "active",
+    Gio.SettingsBindFlags.DEFAULT,
+  );
+  group.add(row);
+  return row;
 }
 
 // ── Keybinding row ──────────────────────────────────────────────────────────
@@ -258,6 +271,12 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     });
     window.add(shortcutPage);
 
+    const sourcesPage = new Adw.PreferencesPage({
+      title: "Search Sources",
+      icon_name: "system-search-symbolic",
+    });
+    window.add(sourcesPage);
+
     const shortcutGroup = new Adw.PreferencesGroup({
       title: "Keyboard Shortcut",
       description: "Shortcut to open and close Superbar",
@@ -277,13 +296,19 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     });
     shortcutPage.add(searchGroup);
 
-    addComboSettingRow(
+    const searchEngineRow = addComboSettingRow(
       searchGroup,
       settings,
       "default-search-engine",
       "Default Search Engine",
       "Used when opening web searches in your browser",
       SEARCH_ENGINES,
+    );
+    settings.bind(
+      "web-search-enabled",
+      searchEngineRow,
+      "sensitive",
+      Gio.SettingsBindFlags.GET,
     );
 
     const adaptiveRankingRow = new Adw.SwitchRow({
@@ -312,6 +337,117 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     );
     resetRankingRow.add_suffix(resetRankingBtn);
     searchGroup.add(resetRankingRow);
+
+    // ── Search sources page ────────────────────────────────────────────────
+    const builtInSourcesGroup = new Adw.PreferencesGroup({
+      title: "Superbar Results",
+      description:
+        "Choose which built-in sources and query types Superbar can use",
+    });
+    sourcesPage.add(builtInSourcesGroup);
+
+    const builtInSources = [
+      [
+        "applications-search-enabled",
+        "Applications",
+        "Find installed applications by name, description, and keywords",
+      ],
+      [
+        "windows-search-enabled",
+        "Open Windows",
+        "Find and switch to matching windows across workspaces",
+      ],
+      [
+        "files-search-enabled",
+        "Files and Folders",
+        "Search common folders and the local file index",
+      ],
+      [
+        "clipboard-search-enabled",
+        "Clipboard History",
+        "Show results for clip, clipboard, and history queries",
+      ],
+      [
+        "calculator-search-enabled",
+        "Calculator",
+        "Evaluate mathematical expressions",
+      ],
+      [
+        "weather-search-enabled",
+        "Weather",
+        "Look up explicit weather queries using Open-Meteo",
+      ],
+      [
+        "dictionary-search-enabled",
+        "Dictionary",
+        "Look up definitions for define queries",
+      ],
+      [
+        "currency-search-enabled",
+        "Currency Conversion",
+        "Convert currencies using amount CODE to CODE queries",
+      ],
+      [
+        "web-search-enabled",
+        "Web Search",
+        "Include a browser search fallback in generic results",
+      ],
+      [
+        "system-actions-search-enabled",
+        "System Actions",
+        "Show commands for >, cmd, command, and action queries",
+      ],
+    ];
+    builtInSources.forEach(([key, title, subtitle]) =>
+      addSwitchSettingRow(
+        builtInSourcesGroup,
+        settings,
+        key,
+        title,
+        subtitle,
+      ),
+    );
+
+    const providerGroup = new Adw.PreferencesGroup({
+      title: "App-Provided Results",
+      description:
+        "Queries are sent to applications enabled in GNOME Search settings",
+    });
+    sourcesPage.add(providerGroup);
+
+    addSwitchSettingRow(
+      providerGroup,
+      settings,
+      "gnome-search-providers-enabled",
+      "GNOME Search Providers",
+      "Include results from Settings, Files, Calendar, Contacts, and other apps",
+    );
+
+    const manageProvidersRow = new Adw.ActionRow({
+      title: "Manage GNOME Search Providers",
+      subtitle: "Choose system-wide providers and their result order",
+      activatable: true,
+    });
+    manageProvidersRow.add_suffix(
+      new Gtk.Image({
+        icon_name: "go-next-symbolic",
+        valign: Gtk.Align.CENTER,
+      }),
+    );
+    manageProvidersRow.connect("activated", () => {
+      const controlCenter = GLib.find_program_in_path("gnome-control-center");
+      if (!controlCenter) return;
+
+      try {
+        Gio.Subprocess.new(
+          [controlCenter, "search"],
+          Gio.SubprocessFlags.NONE,
+        );
+      } catch (_e) {
+        // GNOME Settings may be unavailable on a nonstandard installation.
+      }
+    });
+    providerGroup.add(manageProvidersRow);
 
     // ── Behavior group ─────────────────────────────────────────────────────
     const behaviorGroup = new Adw.PreferencesGroup({
