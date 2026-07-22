@@ -669,6 +669,7 @@ export default class SearchBar extends Extension {
     this._resultRows = [];
     this._resultMetadataActors = [];
     this._clipboardCopyButtons = [];
+    this._calculatorCopyLabel = null;
     this._copiedClipboardValue = null;
     this._resultsState = "hidden";
     this._applyQueryMode(this._classifyQuery(""));
@@ -841,6 +842,7 @@ export default class SearchBar extends Extension {
     this._resultRows = null;
     this._resultMetadataActors = null;
     this._clipboardCopyButtons = null;
+    this._calculatorCopyLabel = null;
     this._copiedClipboardValue = null;
     this._resultsState = null;
     this._selectedIndex = -1;
@@ -2905,6 +2907,7 @@ export default class SearchBar extends Extension {
             x_expand: true,
           });
           answerText.add_child(answerSubtitleLabel);
+          this._calculatorCopyLabel = answerSubtitleLabel;
         }
         answerBox.add_child(answerText);
         row.set_child(answerBox);
@@ -2991,6 +2994,7 @@ export default class SearchBar extends Extension {
     this._statusBox.hide();
     this._resultMetadataActors = [];
     this._clipboardCopyButtons = [];
+    this._calculatorCopyLabel = null;
 
     while (this._resultRows.length > count) {
       const row = this._resultRows.pop();
@@ -3113,6 +3117,7 @@ export default class SearchBar extends Extension {
     this._resultRows = [];
     this._resultMetadataActors = [];
     this._clipboardCopyButtons = [];
+    this._calculatorCopyLabel = null;
     this._statusSpinner?.stop();
     this._statusBox?.hide();
   }
@@ -3137,10 +3142,14 @@ export default class SearchBar extends Extension {
     const result = this._results[index];
     if (!result) return;
 
-    // Clipboard rows stay open so the inline action can visibly confirm the
-    // copy. This applies to clicking the row as well as keyboard activation.
+    // Copy actions stay open so their inline feedback remains visible. This
+    // applies to clicking the row as well as keyboard activation.
     if (result.type === "clipboard") {
       this._copyClipboardResult(index);
+      return;
+    }
+    if (result.type === "calc") {
+      this._copyCalculatorResult(index);
       return;
     }
 
@@ -3177,8 +3186,6 @@ export default class SearchBar extends Extension {
       } catch (e) {
         console.error(`[Superbar] Failed to launch app: ${e}`);
       }
-    } else if (result.type === "calc") {
-      this._clipboard.set_text(St.ClipboardType.CLIPBOARD, result.value);
     } else if (result.type === "provider") {
       if (result.clipboardText) {
         this._clipboard.set_text(
@@ -3225,6 +3232,18 @@ export default class SearchBar extends Extension {
       if (copied) actor.add_style_class_name("copied");
       else actor.remove_style_class_name("copied");
     });
+  }
+
+  _copyCalculatorResult(index) {
+    const result = this._results[index];
+    if (result?.type !== "calc") return;
+
+    this._clipboard.set_text(St.ClipboardType.CLIPBOARD, result.value);
+    result.subtitle = "Copied";
+    if (this._calculatorCopyLabel) {
+      this._calculatorCopyLabel.text = result.subtitle;
+    }
+    this._setSelected(index);
   }
 
   _setSelected(index) {
