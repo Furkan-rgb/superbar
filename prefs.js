@@ -556,7 +556,19 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       ],
     );
 
-    addComboSettingRow(
+    const colorSourceRow = addComboSettingRow(
+      appearanceGroup,
+      settings,
+      "color-source",
+      "Color Source",
+      "Use Superbar colors or match the palette used by GNOME apps",
+      [
+        { key: "superbar", label: "Superbar Palette" },
+        { key: "gnome-apps", label: "Match GNOME Apps" },
+      ],
+    );
+
+    const lightColorRow = addComboSettingRow(
       appearanceGroup,
       settings,
       "light-color-preset",
@@ -566,7 +578,7 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       true,
     );
 
-    addComboSettingRow(
+    const darkColorRow = addComboSettingRow(
       appearanceGroup,
       settings,
       "dark-color-preset",
@@ -575,6 +587,17 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       SURFACE_COLOR_PRESETS.dark,
       true,
     );
+
+    const updateColorPresetSensitivity = () => {
+      const usesSuperbarPalette = colorSourceRow.selected === 0;
+      lightColorRow.sensitive = usesSuperbarPalette;
+      darkColorRow.sensitive = usesSuperbarPalette;
+    };
+    colorSourceRow.connect(
+      "notify::selected",
+      updateColorPresetSensitivity,
+    );
+    updateColorPresetSensitivity();
 
     const backgroundOpacityRow = new Adw.SpinRow({
       title: "Background Opacity",

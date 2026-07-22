@@ -5,8 +5,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getGnomeAppPalette,
   getSurfaceAppearance,
   getSurfaceColor,
+  resolveColorSource,
   resolveThemeVariant,
 } from "../appearance.js";
 
@@ -23,6 +25,34 @@ test("fixed modes override the system color preference", () => {
 test("an unknown mode safely behaves like System mode", () => {
   assert.equal(resolveThemeVariant("unknown", false), "light");
   assert.equal(resolveThemeVariant("unknown", true), "dark");
+});
+
+test("only the GNOME apps color source opts into theme colors", () => {
+  assert.equal(resolveColorSource("gnome-apps"), "gnome-apps");
+  assert.equal(resolveColorSource("superbar"), "superbar");
+  assert.equal(resolveColorSource("unknown"), "superbar");
+});
+
+test("GNOME app palettes combine semantic surfaces with the system accent", () => {
+  assert.deepEqual(getGnomeAppPalette("light", "green"), {
+    background: [250, 250, 251],
+    foreground: [0, 0, 6],
+    accent: [58, 148, 74],
+    accentForeground: [21, 119, 46],
+  });
+  assert.deepEqual(getGnomeAppPalette("dark", "green"), {
+    background: [34, 34, 38],
+    foreground: [255, 255, 255],
+    accent: [58, 148, 74],
+    accentForeground: [141, 230, 152],
+  });
+});
+
+test("unknown GNOME accents safely fall back to blue", () => {
+  assert.deepEqual(
+    getGnomeAppPalette("light", "unknown"),
+    getGnomeAppPalette("light", "blue"),
+  );
 });
 
 test("the current neutral colors remain the defaults", () => {

@@ -101,8 +101,10 @@ git push origin v1.0.0
 ## A few UI details
 
 The default light color is a neutral off-white and the dark color is charcoal.
-There are a handful of alternatives for both, and the background opacity can be
-set from 65% to 100%. It defaults to 90%.
+There are a handful of alternatives for both, or Superbar can match the
+semantic surface, foreground, and accent colors used by GNOME applications.
+The GNOME-app palette follows light/dark and accent preference changes live.
+Background opacity can be set from 65% to 100%. It defaults to 90%.
 
 The bar can sit at the top, center, or bottom of the screen. At the bottom, the
 results open upward and the footer remains below them. Center is the default.
