@@ -1,0 +1,64 @@
+name: Package extension
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ARCHIVE: superbar@Furkan-rgb.github.io.shell-extension.zip
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install GNOME packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends gnome-shell
+
+      - name: Test and package extension
+        run: make test
+
+      - name: Upload packaged extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: superbar-${{ github.sha }}
+          path: build/${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged extension
+        uses: actions/download-artifact@v5
+        with:
+          name: superbar-${{ github.sha }}
+          path: build
+
+      - name: Create GitHub release
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "build/$ARCHIVE" \
+            --verify-tag \
+            --generate-notes \
+            --title "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}

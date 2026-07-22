@@ -51,16 +51,18 @@ for review. Until it is approved, it can be installed manually.
 
 ### Manual
 
+Download `superbar@Furkan-rgb.github.io.shell-extension.zip` from the
+[latest GitHub release](https://github.com/Furkan-rgb/superbar/releases/latest),
+then install it with:
+
 ```bash
-git clone https://github.com/Furkan-rgb/superbar.git \
-  ~/.local/share/gnome-shell/extensions/superbar@Furkan-rgb.github.io
-
-glib-compile-schemas ~/.local/share/gnome-shell/extensions/superbar@Furkan-rgb.github.io/schemas/
-
+gnome-extensions install --force \
+  ~/Downloads/superbar@Furkan-rgb.github.io.shell-extension.zip
 gnome-extensions enable superbar@Furkan-rgb.github.io
 ```
 
-Log out and back in if this is the first time installing.
+Log out and back in if this is the first time installing. The packaged ZIP is
+built and checked automatically from each tagged release.
 
 ---
 
@@ -84,6 +86,14 @@ make export     # export the upload-ready ZIP to build/; does not install
 The generated archive is always named
 `superbar@Furkan-rgb.github.io.shell-extension.zip`. `make export` writes it to
 the repository's `build/` directory but does not update the installed extension.
+
+GitHub Actions also checks and packages every pull request and push to `main`.
+Pushing a version tag creates a GitHub release with the installable ZIP:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ## A few UI details
 
