@@ -2887,9 +2887,7 @@ export default class SearchBar extends Extension {
           vertical: false,
           x_expand: true,
         });
-        const weatherIconTile = this._createResultIcon(result);
-        weatherIconTile.add_style_class_name("weather-icon-tile");
-        card.add_child(weatherIconTile);
+        card.add_child(this._createResultIcon(result));
         card.add_child(infoBox);
         card.add_child(
           new St.Label({
@@ -3069,28 +3067,22 @@ export default class SearchBar extends Extension {
   }
 
   _createResultIcon(result) {
-    const tile = new St.Widget({
-      style_class: "spotlight-result-icon-tile",
-      layout_manager: new Clutter.BinLayout(),
-      y_align: Clutter.ActorAlign.CENTER,
-    });
     const icon = result.gicon
       ? new St.Icon({
           gicon: result.gicon,
-          icon_size: 24,
+          icon_size: 32,
           style_class: "spotlight-result-icon",
           x_align: Clutter.ActorAlign.CENTER,
           y_align: Clutter.ActorAlign.CENTER,
         })
       : new St.Icon({
           icon_name: result.icon || "system-search-symbolic",
-          icon_size: 24,
+          icon_size: 32,
           style_class: "spotlight-result-icon",
           x_align: Clutter.ActorAlign.CENTER,
           y_align: Clutter.ActorAlign.CENTER,
         });
-    tile.add_child(icon);
-    return tile;
+    return icon;
   }
 
   _getResultMetadata(result) {

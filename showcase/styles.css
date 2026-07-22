@@ -246,37 +246,12 @@ body[data-theme="dark"] .mode-indicator {
   background: var(--row-selected);
 }
 
-.icon-tile {
-  display: grid;
-  flex: 0 0 44px;
-  width: 44px;
-  height: 44px;
-  padding: 10px;
-  place-items: center;
-  border-radius: 12px;
-  color: rgba(255, 255, 255, 0.98);
-  background: rgba(69, 130, 190, 0.88);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-}
-
-.result-app .icon-tile {
-  background: rgba(27, 132, 232, 0.92);
-}
-
-.result-window .icon-tile {
-  background: rgba(35, 146, 175, 0.92);
-}
-
-.result-file .icon-tile {
-  background: rgba(65, 137, 215, 0.92);
-}
-
-.result-web .icon-tile {
-  background: rgba(64, 119, 185, 0.92);
-}
-
-.result-clipboard .icon-tile {
-  background: rgba(113, 86, 205, 0.92);
+.result-icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  margin: 0 6px;
+  color: rgba(var(--muted), 0.72);
 }
 
 .result-text,
@@ -363,10 +338,6 @@ body[data-theme="dark"] .result-row.weather-card.selected {
   background: rgba(62, 142, 213, 0.18);
 }
 
-.answer .icon-tile {
-  background: rgba(91, 112, 133, 0.92);
-}
-
 .answer-context {
   line-height: 16px;
 }
@@ -376,10 +347,6 @@ body[data-theme="dark"] .result-row.weather-card.selected {
   font-size: 32px;
   font-weight: 400;
   line-height: 34px;
-}
-
-.weather-tile {
-  background: rgba(47, 142, 216, 0.92);
 }
 
 .weather-details {

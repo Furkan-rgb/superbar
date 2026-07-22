@@ -44,7 +44,7 @@
 
     return `
       <article class="result-row result-${row.type}${row.selected ? " selected" : ""}">
-        <span class="icon-tile">${icon(row.icon)}</span>
+        ${icon(row.icon, "result-icon")}
         <span class="result-text">
           <span class="result-title">${row.title}</span>
           ${row.subtitle ? `<span class="result-subtitle">${row.subtitle}</span>` : ""}
@@ -56,7 +56,7 @@
   function renderCalculator(row) {
     return `
       <article class="result-row answer${row.selected ? " selected" : ""}">
-        <span class="icon-tile">${icon(row.icon)}</span>
+        ${icon(row.icon, "result-icon")}
         <span class="result-text">
           <span class="answer-context">${row.context}</span>
           <span class="answer-value">${row.title}</span>
@@ -68,7 +68,7 @@
   function renderWeather(row) {
     return `
       <article class="result-row weather-card${row.selected ? " selected" : ""}">
-        <span class="icon-tile weather-tile">${icon(row.icon)}</span>
+        ${icon(row.icon, "result-icon")}
         <span class="weather-copy">
           <span class="weather-city">${row.title}</span>
           <span class="result-subtitle">${row.description}</span>

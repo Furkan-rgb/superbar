@@ -191,42 +191,10 @@
     background-color: rgba(71, 153, 225, 0.25);
 }
 
-.spotlight-result-icon-tile {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    background-color: rgba(69, 130, 190, 0.88);
-    color: rgba(255, 255, 255, 0.98);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.10);
-}
-
 .spotlight-result-icon {
-    icon-size: 24px;
-    color: rgba(255, 255, 255, 0.98);
-}
-
-.spotlight-result-row.result-app .spotlight-result-icon-tile {
-    background-color: rgba(27, 132, 232, 0.92);
-}
-
-.spotlight-result-row.result-window .spotlight-result-icon-tile {
-    background-color: rgba(35, 146, 175, 0.92);
-}
-
-.spotlight-result-row.result-file .spotlight-result-icon-tile {
-    background-color: rgba(65, 137, 215, 0.92);
-}
-
-.spotlight-result-row.result-web .spotlight-result-icon-tile {
-    background-color: rgba(64, 119, 185, 0.92);
-}
-
-.spotlight-result-row.result-clipboard .spotlight-result-icon-tile {
-    background-color: rgba(113, 86, 205, 0.92);
-}
-
-.spotlight-result-row.result-system .spotlight-result-icon-tile {
-    background-color: rgba(91, 112, 133, 0.92);
+    icon-size: 32px;
+    margin: 0 6px;
+    color: rgba(38, 38, 38, 0.72);
 }
 
 .spotlight-result-text {
@@ -329,10 +297,6 @@
 .spotlight-result-row.weather-card.selected,
 .spotlight-result-row.weather-card:focus {
     background-color: rgba(71, 153, 225, 0.18);
-}
-
-.weather-icon-tile {
-    background-color: rgba(47, 142, 216, 0.92);
 }
 
 .weather-temp {
@@ -497,6 +461,10 @@
 .dark-mode .spotlight-result-row.selected:hover,
 .dark-mode .spotlight-result-row:focus {
     background-color: rgba(62, 142, 213, 0.25);
+}
+
+.dark-mode .spotlight-result-icon {
+    color: rgba(225, 225, 225, 0.72);
 }
 
 .dark-mode .spotlight-result-label,
