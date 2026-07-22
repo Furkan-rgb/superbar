@@ -9,6 +9,7 @@ import GLib from "gi://GLib";
 import GObject from "gi://GObject";
 import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js";
 import { SURFACE_COLOR_PRESETS } from "./appearance.js";
+import { SEARCH_ENGINES } from "./search-engines.js";
 
 function addRoundedRectangle(cr, x, y, width, height, radius) {
   cr.newSubPath();
@@ -272,9 +273,18 @@ export default class SuperbarPreferences extends ExtensionPreferences {
     // ── Search group ────────────────────────────────────────────────────────
     const searchGroup = new Adw.PreferencesGroup({
       title: "Search",
-      description: "Control how Superbar orders matching results",
+      description: "Control web searches and how matching results are ordered",
     });
     shortcutPage.add(searchGroup);
+
+    addComboSettingRow(
+      searchGroup,
+      settings,
+      "default-search-engine",
+      "Default Search Engine",
+      "Used when opening web searches in your browser",
+      SEARCH_ENGINES,
+    );
 
     const adaptiveRankingRow = new Adw.SwitchRow({
       title: "Adaptive Ranking",

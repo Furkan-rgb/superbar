@@ -16,6 +16,7 @@ import * as SystemActions from "resource:///org/gnome/shell/misc/systemActions.j
 import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
 import { getSurfaceAppearance } from "./appearance.js";
+import { buildSearchUri, getSearchEngine } from "./search-engines.js";
 
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
@@ -679,6 +680,8 @@ export default class SearchBar extends Extension {
       "changed::clipboard-history-clear-request",
       () => this._clearClipboardHistory(),
       "changed::max-results",
+      () => this._refreshCurrentSearch(),
+      "changed::default-search-engine",
       () => this._refreshCurrentSearch(),
       "changed::adaptive-ranking-enabled",
       () => this._refreshCurrentSearch(),
@@ -1405,10 +1408,13 @@ export default class SearchBar extends Extension {
       ),
     );
     const maxResults = this._settings.get_int("max-results");
+    const searchEngine = getSearchEngine(
+      this._settings.get_string("default-search-engine"),
+    );
     const webResult = {
       type: "web",
       label: text,
-      subtitle: "Search the web",
+      subtitle: `Search with ${searchEngine.label}`,
       icon: "web-browser-symbolic",
       query: text,
     };
@@ -2968,7 +2974,10 @@ export default class SearchBar extends Extension {
     } else if (result.type === "web") {
       const uri =
         result.uri ??
-        `https://www.google.com/search?q=${encodeURIComponent(result.query)}`;
+        buildSearchUri(
+          this._settings.get_string("default-search-engine"),
+          result.query,
+        );
       this._openUri(uri);
     } else if (result.type === "system") {
       this._runSystemAction(result);

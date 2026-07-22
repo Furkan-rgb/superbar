@@ -32,6 +32,11 @@ Copyright (C) 2026 Furkan
       <summary>Maximum Search Results</summary>
       <description>How many results to show in the search bar at once.</description>
     </key>
+    <key name="default-search-engine" type="s">
+      <default>'google'</default>
+      <summary>Default Search Engine</summary>
+      <description>Search engine used to open web searches.</description>
+    </key>
     <key name="adaptive-ranking-enabled" type="b">
       <default>true</default>
       <summary>Enable Adaptive Ranking</summary>

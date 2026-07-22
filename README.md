@@ -31,7 +31,7 @@ A launcher and command bar for GNOME Shell, inspired by macOS Spotlight. Press
 | **Calculator**            | Type an expression such as `2 * (3 + 4)`                               |
 | **Currency Converter**    | `100 USD to EUR`                                                       |
 | **Dictionary**            | `define word`                                                          |
-| **Web Search**            | Unmatched searches can be opened in your browser                       |
+| **Web Search**            | Open unmatched searches with your preferred search engine              |
 | **System Actions**        | Start with `>`, `cmd`, `command`, or `action`                          |
 | **Resumable Searches**    | Close and reopen the bar without immediately losing your search        |
 | **Adaptive Ranking**      | Apps and actions you choose can move higher in later searches          |
@@ -97,6 +97,8 @@ results open upward and the footer remains below them. Center is the default.
 Search results stay in one list rather than being split into tabs. The small
 label beside the search field shows when Superbar has recognized something like
 a clipboard, calculator, weather, dictionary, currency, or system-action query.
+Web searches use Google by default. This can be changed in settings to
+DuckDuckGo, Bing, Brave Search, Ecosia, or Startpage.
 
 When working on the Shell UI, use a fresh nested session so an older cached copy
 of the extension does not get in the way:

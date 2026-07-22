@@ -64,12 +64,13 @@ lint:
 	fi
 
 unit:
-	@node --experimental-default-type=module tests/appearance.test.js
+	@node --test tests/*.test.js
 
 pack: check
 	@mkdir -p "$(BUILD_DIR)"
 	@gnome-extensions pack --force --out-dir="$(BUILD_DIR)" \
-		--extra-source=LICENSE --extra-source=appearance.js .
+		--extra-source=LICENSE --extra-source=appearance.js \
+		--extra-source=search-engines.js .
 	@printf "Built %s\n" "$(BUILD_ARCHIVE)"
 
 verify: pack
