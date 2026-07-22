@@ -37,6 +37,61 @@ Copyright (C) 2026 Furkan
       <summary>Default Search Engine</summary>
       <description>Search engine used to open web searches.</description>
     </key>
+    <key name="applications-search-enabled" type="b">
+      <default>true</default>
+      <summary>Search Applications</summary>
+      <description>Include installed applications in generic searches.</description>
+    </key>
+    <key name="windows-search-enabled" type="b">
+      <default>true</default>
+      <summary>Search Open Windows</summary>
+      <description>Include matching open windows in generic searches.</description>
+    </key>
+    <key name="files-search-enabled" type="b">
+      <default>true</default>
+      <summary>Search Files and Folders</summary>
+      <description>Include common folders and indexed local files in generic searches.</description>
+    </key>
+    <key name="clipboard-search-enabled" type="b">
+      <default>true</default>
+      <summary>Search Clipboard History</summary>
+      <description>Enable clipboard history queries in Superbar.</description>
+    </key>
+    <key name="calculator-search-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Calculator Results</summary>
+      <description>Evaluate mathematical expressions in Superbar.</description>
+    </key>
+    <key name="weather-search-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Weather Results</summary>
+      <description>Enable Superbar weather queries through Open-Meteo.</description>
+    </key>
+    <key name="dictionary-search-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Dictionary Results</summary>
+      <description>Enable Superbar dictionary queries.</description>
+    </key>
+    <key name="currency-search-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Currency Results</summary>
+      <description>Enable Superbar currency conversion queries.</description>
+    </key>
+    <key name="web-search-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Web Search</summary>
+      <description>Include a web search fallback in generic searches.</description>
+    </key>
+    <key name="system-actions-search-enabled" type="b">
+      <default>true</default>
+      <summary>Search System Actions</summary>
+      <description>Enable prefixed system action queries.</description>
+    </key>
+    <key name="gnome-search-providers-enabled" type="b">
+      <default>true</default>
+      <summary>Use GNOME Search Providers</summary>
+      <description>Include results supplied by applications enabled in GNOME Search settings.</description>
+    </key>
     <key name="adaptive-ranking-enabled" type="b">
       <default>true</default>
       <summary>Enable Adaptive Ranking</summary>

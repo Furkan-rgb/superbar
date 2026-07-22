@@ -39,6 +39,10 @@ syntax:
 	@node --input-type=module --check < extension.js
 	@node --input-type=module --check < prefs.js
 	@node --input-type=module --check < appearance.js
+	@node --input-type=module --check < app-search.js
+	@node --input-type=module --check < search-provider-config.js
+	@node --input-type=module --check < gnome-search-providers.js
+	@node --input-type=module --check < scripts/smoke-search-providers.js
 	@printf "JavaScript syntax is valid.\n"
 
 schema:
@@ -57,7 +61,8 @@ lint:
 			--rule 'no-unused-vars:error' \
 			--rule 'no-dupe-keys:error' \
 			--rule 'no-unreachable:error' \
-			extension.js prefs.js appearance.js tests/appearance.test.js; \
+			extension.js prefs.js appearance.js app-search.js \
+			search-provider-config.js gnome-search-providers.js tests/*.test.js; \
 		printf "ESLint checks passed.\n"; \
 	else \
 		printf "ESLint is not installed; skipping optional lint checks.\n"; \
@@ -70,6 +75,9 @@ pack: check
 	@mkdir -p "$(BUILD_DIR)"
 	@gnome-extensions pack --force --out-dir="$(BUILD_DIR)" \
 		--extra-source=LICENSE --extra-source=appearance.js \
+		--extra-source=app-search.js \
+		--extra-source=search-provider-config.js \
+		--extra-source=gnome-search-providers.js \
 		--extra-source=search-engines.js --extra-source=result-selection.js .
 	@printf "Built %s\n" "$(BUILD_ARCHIVE)"
 
