@@ -17,6 +17,7 @@ import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
 import { getSurfaceAppearance } from "./appearance.js";
 import { buildSearchUri, getSearchEngine } from "./search-engines.js";
+import { getNextResultIndex } from "./result-selection.js";
 
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
@@ -562,11 +563,12 @@ export default class SearchBar extends Extension {
         const key = event.get_key_symbol();
 
         if (key === Clutter.KEY_Down || key === Clutter.KEY_Tab) {
-          const max = this._results.length - 1;
-          if (this._selectedIndex < max) {
-            this._setSelected(this._selectedIndex + 1);
-          } else if (this._results.length > 0 && this._selectedIndex === -1) {
-            this._setSelected(0);
+          const nextIndex = getNextResultIndex(
+            this._selectedIndex,
+            this._results.length,
+          );
+          if (nextIndex !== this._selectedIndex) {
+            this._setSelected(nextIndex);
           }
           return Clutter.EVENT_STOP;
         }

@@ -70,7 +70,7 @@ pack: check
 	@mkdir -p "$(BUILD_DIR)"
 	@gnome-extensions pack --force --out-dir="$(BUILD_DIR)" \
 		--extra-source=LICENSE --extra-source=appearance.js \
-		--extra-source=search-engines.js .
+		--extra-source=search-engines.js --extra-source=result-selection.js .
 	@printf "Built %s\n" "$(BUILD_ARCHIVE)"
 
 verify: pack
