@@ -15,7 +15,11 @@ import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import * as SystemActions from "resource:///org/gnome/shell/misc/systemActions.js";
 import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
-import { getSurfaceAppearance } from "./appearance.js";
+import {
+  getGnomeAppPalette,
+  getSurfaceAppearance,
+  resolveColorSource,
+} from "./appearance.js";
 import {
   buildAppSearchText,
   isSettingsPanelApp,
@@ -46,6 +50,7 @@ const RANKING_HISTORY_LIMIT = 50;
 const RANKING_HISTORY_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const SETTINGS_PROVIDER_DESKTOP_ID = "org.gnome.Settings.desktop";
 const FILES_PROVIDER_DESKTOP_ID = "org.gnome.Nautilus.desktop";
+const GNOME_INTERFACE_SCHEMA_ID = "org.gnome.desktop.interface";
 const SEARCH_SOURCE_SETTING_KEYS = [
   "applications-search-enabled",
   "windows-search-enabled",
@@ -124,6 +129,11 @@ function normalizeSearchText(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function rgba(color, alpha = 1) {
+  const [red, green, blue] = color;
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
 function scoreSingleSearchTerm(haystack, needle) {
@@ -333,6 +343,13 @@ export default class SearchBar extends Extension {
     this._settings = this.getSettings();
     this._shellSettings = St.Settings.get();
     this._themeContext = St.ThemeContext.get_for_stage(global.stage);
+    try {
+      this._interfaceSettings = new Gio.Settings({
+        schema_id: GNOME_INTERFACE_SCHEMA_ID,
+      });
+    } catch (_e) {
+      this._interfaceSettings = null;
+    }
     this._rankingHistory = new Map();
     this._loadRankingHistory();
     this._session = new Soup.Session();
@@ -556,12 +573,11 @@ export default class SearchBar extends Extension {
       vertical: false,
       y_align: Clutter.ActorAlign.CENTER,
     });
-    this._actionsHint.add_child(
-      new St.Label({
-        text: ">",
-        style_class: "spotlight-footer-key spotlight-actions-key",
-      }),
-    );
+    this._actionsKey = new St.Label({
+      text: ">",
+      style_class: "spotlight-footer-key spotlight-actions-key",
+    });
+    this._actionsHint.add_child(this._actionsKey);
     this._actionsHint.add_child(
       new St.Label({
         text: "Actions",
@@ -681,6 +697,13 @@ export default class SearchBar extends Extension {
       () => this._updateTheme(),
       this,
     );
+    if (this._interfaceSettings?.settings_schema.has_key("accent-color")) {
+      this._interfaceSettings.connectObject(
+        "changed::accent-color",
+        () => this._updateTheme(),
+        this,
+      );
+    }
     Main.sessionMode.connectObject("updated", () => this._updateTheme(), this);
     this._themeContext.connectObject(
       "changed",
@@ -715,6 +738,8 @@ export default class SearchBar extends Extension {
       "changed::bar-position",
       () => this._repositionContainer(),
       "changed::theme-mode",
+      () => this._updateTheme(),
+      "changed::color-source",
       () => this._updateTheme(),
       "changed::light-color-preset",
       () => this._updateTheme(),
@@ -772,6 +797,7 @@ export default class SearchBar extends Extension {
     this._windowTracker?.disconnectObject(this);
     this._entry?.clutter_text.disconnectObject(this);
     this._shellSettings?.disconnectObject(this);
+    this._interfaceSettings?.disconnectObject(this);
     Main.sessionMode.disconnectObject(this);
     this._themeContext?.disconnectObject(this);
     if (this._container) {
@@ -814,6 +840,7 @@ export default class SearchBar extends Extension {
     this._footerDivider = null;
     this._footer = null;
     this._actionsHint = null;
+    this._actionsKey = null;
     this._footerSpacer = null;
     this._footerHints = null;
     this._navigateHint = null;
@@ -832,7 +859,9 @@ export default class SearchBar extends Extension {
     this._searchProviderManager = null;
     this._searchProviderSettings = null;
     this._shellSettings = null;
+    this._interfaceSettings = null;
     this._themeContext = null;
+    this._gnomeAppPalette = null;
     this._clipboard = null;
     this._clipboardHistory = null;
     this._clipboardSearchHistory = null;
@@ -3256,11 +3285,22 @@ export default class SearchBar extends Extension {
     rows.forEach((row, i) => {
       row.remove_style_class_name("selected");
       row.remove_style_class_name("inactive-selection");
+      row.set_style(null);
 
       if (i === this._selectedIndex) {
         row.add_style_class_name("selected");
+        if (this._gnomeAppPalette) {
+          row.set_style(
+            `background-color: ${rgba(this._gnomeAppPalette.accent, 0.25)};`,
+          );
+        }
       } else if (this._selectedIndex === -1 && i === 0) {
         row.add_style_class_name("inactive-selection");
+        if (this._gnomeAppPalette) {
+          row.set_style(
+            `background-color: ${rgba(this._gnomeAppPalette.accent, 0.14)};`,
+          );
+        }
       }
     });
 
@@ -3553,7 +3593,10 @@ export default class SearchBar extends Extension {
   _updateTheme() {
     // Main.getStyleVariant() reflects the shell chrome rather than the system
     // color-scheme, so System mode follows St.Settings directly.
-    const { variant: styleVariant, color, opacity } = getSurfaceAppearance({
+    const colorSource = resolveColorSource(
+      this._settings.get_string("color-source"),
+    );
+    const surfaceAppearance = getSurfaceAppearance({
       configuredMode: this._settings.get_string("theme-mode"),
       systemPrefersDark:
         this._shellSettings.color_scheme ===
@@ -3562,6 +3605,12 @@ export default class SearchBar extends Extension {
       darkPresetKey: this._settings.get_string("dark-color-preset"),
       opacityPercentage: this._settings.get_int("background-opacity"),
     });
+    const { variant: styleVariant, opacity } = surfaceAppearance;
+    const gnomeAppPalette =
+      colorSource === "gnome-apps"
+        ? getGnomeAppPalette(styleVariant, this._getSystemAccentName())
+        : null;
+    const color = gnomeAppPalette?.background ?? surfaceAppearance.color;
 
     if (styleVariant === "dark") {
       this._container.add_style_class_name("dark-mode");
@@ -3569,12 +3618,70 @@ export default class SearchBar extends Extension {
       this._container.remove_style_class_name("dark-mode");
     }
 
+    if (gnomeAppPalette) {
+      this._container.add_style_class_name("gnome-app-colors");
+    } else {
+      this._container.remove_style_class_name("gnome-app-colors");
+    }
+
     const [red, green, blue] = color;
     this._materialLayer.set_style(
       `background-color: rgba(${red}, ${green}, ${blue}, ${opacity});`,
     );
 
-    this._applySystemTextColor(styleVariant);
+    if (gnomeAppPalette) {
+      this._applyGnomeAppColors(styleVariant, gnomeAppPalette);
+    } else {
+      this._clearGnomeAppColors();
+      this._applySystemTextColor(styleVariant);
+    }
+  }
+
+  _getSystemAccentName() {
+    if (!this._interfaceSettings?.settings_schema.has_key("accent-color")) {
+      return "blue";
+    }
+
+    try {
+      return this._interfaceSettings.get_string("accent-color");
+    } catch (_e) {
+      return "blue";
+    }
+  }
+
+  _applyGnomeAppColors(styleVariant, palette) {
+    const foregroundAlpha = styleVariant === "dark" ? 1 : 0.8;
+    const foreground = rgba(palette.foreground, foregroundAlpha);
+    const selectedForeground = rgba(palette.foreground, 0.98);
+
+    this._gnomeAppPalette = palette;
+    this._container.set_style(`color: ${foreground};`);
+    this._entry?.set_style(
+      `color: ${foreground}; ` +
+        `caret-color: ${rgba(palette.accentForeground, 0.96)}; ` +
+        `selection-background-color: ${rgba(palette.accent, 0.3)}; ` +
+        `selected-color: ${selectedForeground};`,
+    );
+    this._modeDot?.set_style(
+      `background-color: ${rgba(palette.accent, 0.85)};`,
+    );
+    this._statusSpinner?.set_style(
+      `color: ${rgba(palette.accentForeground, 0.82)};`,
+    );
+    this._actionsKey?.set_style(
+      `border-color: ${rgba(palette.accent, 0.12)}; ` +
+        `background-color: ${rgba(palette.accent, 0.11)}; ` +
+        `color: ${rgba(palette.accentForeground, 0.82)};`,
+    );
+    this._updateSelection();
+  }
+
+  _clearGnomeAppColors() {
+    this._gnomeAppPalette = null;
+    this._modeDot?.set_style(null);
+    this._statusSpinner?.set_style(null);
+    this._actionsKey?.set_style(null);
+    this._resultRows?.forEach((row) => row.set_style(null));
   }
 
   _applySystemTextColor(styleVariant) {

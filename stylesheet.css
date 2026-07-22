@@ -574,3 +574,97 @@
     background-color: rgba(78, 168, 235, 0.10);
     color: rgba(139, 205, 255, 0.76);
 }
+
+/* ---------------------------------------------------------------------
+ * 8. GNOME application palette
+ * --------------------------------------------------------------------- */
+
+.gnome-app-colors.spotlight-container,
+.gnome-app-colors .spotlight-entry,
+.gnome-app-colors .spotlight-entry:focus,
+.gnome-app-colors .spotlight-result-row,
+.gnome-app-colors .spotlight-result-label,
+.gnome-app-colors .spotlight-result-row.answer .spotlight-result-label,
+.gnome-app-colors .weather-temp,
+.gnome-app-colors .weather-city {
+    color: rgba(0, 0, 6, 0.80);
+}
+
+.gnome-app-colors .spotlight-icon,
+.gnome-app-colors .spotlight-mode-label,
+.gnome-app-colors .spotlight-status,
+.gnome-app-colors .spotlight-status-label,
+.gnome-app-colors .spotlight-result-subtitle,
+.gnome-app-colors .spotlight-answer-context,
+.gnome-app-colors .weather-desc,
+.gnome-app-colors .weather-details,
+.gnome-app-colors .spotlight-result-metadata,
+.gnome-app-colors .spotlight-result-row.answer .spotlight-result-subtitle,
+.gnome-app-colors .spotlight-result-copy,
+.gnome-app-colors .spotlight-footer,
+.gnome-app-colors .spotlight-actions-hint,
+.gnome-app-colors .spotlight-footer-label {
+    color: rgba(0, 0, 6, 0.55);
+}
+
+.gnome-app-colors .spotlight-entry StLabel.hint-text {
+    color: rgba(0, 0, 6, 0.46);
+}
+
+.gnome-app-colors .spotlight-material {
+    border-color: rgba(0, 0, 6, 0.15);
+}
+
+.gnome-app-colors .spotlight-divider {
+    background-color: rgba(0, 0, 6, 0.12);
+}
+
+.gnome-app-colors .spotlight-footer-key {
+    border-color: rgba(0, 0, 6, 0.12);
+    color: rgba(0, 0, 6, 0.62);
+}
+
+.gnome-app-colors.dark-mode.spotlight-container,
+.gnome-app-colors.dark-mode .spotlight-entry,
+.gnome-app-colors.dark-mode .spotlight-entry:focus,
+.gnome-app-colors.dark-mode .spotlight-result-row,
+.gnome-app-colors.dark-mode .spotlight-result-label,
+.gnome-app-colors.dark-mode .spotlight-result-row.answer .spotlight-result-label,
+.gnome-app-colors.dark-mode .weather-temp,
+.gnome-app-colors.dark-mode .weather-city {
+    color: rgba(255, 255, 255, 1);
+}
+
+.gnome-app-colors.dark-mode .spotlight-icon,
+.gnome-app-colors.dark-mode .spotlight-mode-label,
+.gnome-app-colors.dark-mode .spotlight-status,
+.gnome-app-colors.dark-mode .spotlight-status-label,
+.gnome-app-colors.dark-mode .spotlight-result-subtitle,
+.gnome-app-colors.dark-mode .spotlight-answer-context,
+.gnome-app-colors.dark-mode .weather-desc,
+.gnome-app-colors.dark-mode .weather-details,
+.gnome-app-colors.dark-mode .spotlight-result-metadata,
+.gnome-app-colors.dark-mode .spotlight-result-row.answer .spotlight-result-subtitle,
+.gnome-app-colors.dark-mode .spotlight-result-copy,
+.gnome-app-colors.dark-mode .spotlight-footer,
+.gnome-app-colors.dark-mode .spotlight-actions-hint,
+.gnome-app-colors.dark-mode .spotlight-footer-label {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.gnome-app-colors.dark-mode .spotlight-entry StLabel.hint-text {
+    color: rgba(255, 255, 255, 0.46);
+}
+
+.gnome-app-colors.dark-mode .spotlight-material {
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.gnome-app-colors.dark-mode .spotlight-divider {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.gnome-app-colors.dark-mode .spotlight-footer-key {
+    border-color: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.62);
+}
