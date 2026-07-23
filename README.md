@@ -66,9 +66,7 @@ gnome-extensions install --force \
 gnome-extensions enable superbar@Furkan-rgb.github.io
 ```
 
-Log out and back in if this is the first time installing. For every pushed
-version tag matching `v*`, GitHub Actions builds and checks the packaged ZIP,
-then attaches it to a GitHub release.
+Log out and back in if this is the first time installing.
 
 ---
 
@@ -94,11 +92,6 @@ make export     # export the upload-ready ZIP to build/; does not install
 The generated archive is always named
 `superbar@Furkan-rgb.github.io.shell-extension.zip`. `make export` writes it to
 the repository's `build/` directory but does not update the installed extension.
-
-GitHub Actions also checks and packages every pull request and push to `main`.
-Those builds are available as temporary workflow artifacts. Pushing a new,
-unused version tag matching `v*` and the form `vMAJOR.MINOR.PATCH` additionally
-creates a GitHub release and attaches the installable ZIP to it.
 
 ## A few UI details
 
