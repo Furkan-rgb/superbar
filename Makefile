@@ -120,7 +120,9 @@ unit-gtk:
 # (pip install -U shexli). Deliberately not part of `make test`: shexli 0.2.1
 # segfaults on this extension's two largest files, inside its own
 # lifecycle/collect.py -> evidence.py node handling, so it cannot gate a build
-# yet. It runs clean on the smaller modules.
+# yet. It runs clean on the smaller modules. Downgrading is not a way round it
+# — 0.1.0 and 0.2.0 are both yanked from PyPI as "Broken version" and will not
+# even import — so this target is here for whenever a fixed release lands.
 shexli: pack
 	@if command -v shexli >/dev/null 2>&1; then \
 		shexli "$(BUILD_ARCHIVE)"; \
