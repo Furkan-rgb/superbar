@@ -8,6 +8,8 @@ Releases are cut by pushing a `v*` tag, which triggers the packaging workflow.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-16
+
 ### Changed
 
 - Clipboard monitoring is now event-driven instead of polled. The extension
@@ -75,7 +77,8 @@ Initial public release.
 - Bottom-positioned results layout and configurable divider visibility.
 - Showcase rendering script with a high-resolution render scale option.
 
-[Unreleased]: https://github.com/Furkan-rgb/superbar/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Furkan-rgb/superbar/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/Furkan-rgb/superbar/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Furkan-rgb/superbar/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/Furkan-rgb/superbar/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Furkan-rgb/superbar/compare/v1.0.0...v1.1.0
