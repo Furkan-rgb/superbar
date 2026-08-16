@@ -24,6 +24,21 @@ Releases are cut by pushing a `v*` tag, which triggers the packaging workflow.
   `scripts/headless-session.mjs`, so the renderer and the smoke test share one
   copy instead of growing two that drift.
 
+### Fixed
+
+- `make unit-gtk`, and so `make test`, could stop partway through and wait for
+  a keypress. Its `waitFor` helper pumped the main loop with a blocking
+  iteration, and both conditions it waits on — the dialog taking focus, and
+  the compositor granting a shortcut inhibitor — are ones a compositor is free
+  never to satisfy. With nothing else due to wake the loop, only a real key
+  event moved it along. The wait is bounded by a timeout source now.
+- The preferences test no longer passes or fails depending on which window
+  happened to hold focus when it started. Whether the capture dialog can take
+  keyboard focus is the environment's call, and without it the compositor
+  cannot grant the shortcut inhibitor at all, so that check now reports itself
+  skipped rather than failed. It still runs, and can still fail, wherever the
+  dialog does take focus.
+
 ## [1.3.1] - 2026-08-16
 
 ### Fixed

@@ -62,6 +62,12 @@ function check(name, condition, detail = "") {
   }
 }
 
+// For behaviour the environment will not let this process exercise. It counts
+// as passed so a headless or unfocused run is not a failure, and says why.
+function skip(name, reason) {
+  print(`ok ${++passed + failed} - ${name} # SKIP ${reason}`);
+}
+
 function findRow(widget, typeName) {
   if (!widget) return null;
   if (widget.constructor?.$gtype?.name === typeName) return widget;
@@ -87,9 +93,24 @@ function settle(iterations = 200) {
 
 // Focus and the compositor's answer to an inhibit request both arrive as
 // events, so waiting on a condition beats guessing an iteration count.
-function waitFor(predicate, iterations = 600) {
+//
+// The timeout is what makes that wait safe. iteration() blocks until some
+// event arrives, and neither condition is guaranteed: a compositor is free to
+// leave the window unfocused, and it may refuse the inhibit outright, which
+// the caller already treats as an answer. Without a source to wake it, the
+// only thing left to unblock the loop is the person at the keyboard pressing
+// a key, which is no way to run a test.
+function waitFor(predicate, timeoutMs = 5000) {
   const context = GLib.MainContext.default();
-  for (let i = 0; i < iterations && !predicate(); i++) context.iteration(true);
+  let expired = false;
+  const timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeoutMs, () => {
+    expired = true;
+    return GLib.SOURCE_REMOVE;
+  });
+
+  while (!expired && !predicate()) context.iteration(true);
+
+  if (!expired) GLib.Source.remove(timeoutId);
   return predicate();
 }
 
@@ -220,15 +241,24 @@ if (dialog) {
     "the dialog asks for system shortcuts to be inhibited",
     Boolean(keybindingRow._inhibitedSurface),
   );
-  waitFor(() => dialog.is_active);
-  const granted = waitFor(
-    () => dialog.get_surface()?.shortcuts_inhibited === true,
-  );
-  check(
-    "the compositor grants the inhibit, so Alt+Space reaches the dialog",
-    granted,
-    "the compositor kept its own shortcuts; conflicting combinations cannot be pressed here",
-  );
+  // Whether the dialog can take focus at all is the environment's call: run
+  // this from a terminal that keeps focus, or under a compositor that does not
+  // hand it over, and the inhibit can never be granted. That makes the check
+  // impossible to run rather than failed, so it is reported as skipped —
+  // failing on it would make the suite depend on which window happens to be
+  // focused when it starts.
+  if (!waitFor(() => dialog.is_active)) {
+    skip(
+      "the compositor grants the inhibit, so Alt+Space reaches the dialog",
+      "the dialog never took keyboard focus, so the inhibit could not be asked for",
+    );
+  } else {
+    check(
+      "the compositor grants the inhibit, so Alt+Space reaches the dialog",
+      waitFor(() => dialog.get_surface()?.shortcuts_inhibited === true),
+      "the compositor kept its own shortcuts; conflicting combinations cannot be pressed here",
+    );
+  }
 
   dialog.destroy();
   settle();
