@@ -74,6 +74,7 @@ lint:
 			--global global:readonly \
 			--global console:readonly \
 			--global TextDecoder:readonly \
+			--global TextEncoder:readonly \
 			--global print:readonly \
 			--rule 'no-undef:error' \
 			--rule 'no-unused-vars:error' \
@@ -116,18 +117,25 @@ unit-gtk:
 		dbus-run-session -- gjs -m tests/prefs-gtk.js; \
 	fi
 
-# The static analyser extensions.gnome.org recommends running before uploading
-# (pip install -U shexli). Deliberately not part of `make test`: shexli 0.2.1
-# segfaults on this extension's two largest files, inside its own
-# lifecycle/collect.py -> evidence.py node handling, so it cannot gate a build
-# yet. It runs clean on the smaller modules. Downgrading is not a way round it
-# — 0.1.0 and 0.2.0 are both yanked from PyPI as "Broken version" and will not
-# even import — so this target is here for whenever a fixed release lands.
+# The static analyser extensions.gnome.org recommends running before uploading.
+# It exits 0 whatever it finds, so this target reports rather than gates and
+# stays out of `make test`; read the findings yourself before an upload.
+# Analyse the packed archive, never the source tree — a checkout carries the
+# venv and the showcase renders, which blow shexli's 50MB input limit.
+#
+# The venv is local-only (uv writes a self-ignoring .gitignore into it), so a
+# fresh checkout has no analyser until someone runs SHEXLI_VENV's install line.
+SHEXLI_VENV := venv
+SHEXLI = $(firstword $(wildcard $(SHEXLI_VENV)/bin/shexli) \
+	$(shell command -v shexli 2>/dev/null))
+
 shexli: pack
-	@if command -v shexli >/dev/null 2>&1; then \
-		shexli "$(BUILD_ARCHIVE)"; \
+	@if [ -n "$(SHEXLI)" ]; then \
+		"$(SHEXLI)" "$(BUILD_ARCHIVE)"; \
 	else \
-		printf "shexli is not installed; skipping. Install it with: pip install -U shexli\n"; \
+		printf "shexli is not installed; skipping. Install it with:\n"; \
+		printf "  python3 -m venv %s && %s/bin/pip install -U shexli\n" \
+			"$(SHEXLI_VENV)" "$(SHEXLI_VENV)"; \
 	fi
 
 pack: check
