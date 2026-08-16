@@ -155,6 +155,18 @@ const SYSTEM_FOLDERS = [
   { name: "Music", action: null },
 ];
 
+// Every diagnostic goes through these two, so the journal carries one prefix
+// rather than the two spellings that had grown up in different parts of the
+// file, and there is a single place to quieten logging if it ever needs it.
+// Nothing here logs during normal operation — these are failure paths only.
+function logError(message) {
+  console.error(`Superbar: ${message}`);
+}
+
+function logWarning(message) {
+  console.warn(`Superbar: ${message}`);
+}
+
 function normalizeSearchText(value) {
   return String(value ?? "")
     .normalize("NFKD")
@@ -377,7 +389,7 @@ export default class SearchBar extends Extension {
       try {
         this.disable();
       } catch (cleanupError) {
-        console.error(`Superbar: cleanup after a failed enable also failed: ${cleanupError}`);
+        logError(`cleanup after a failed enable also failed: ${cleanupError}`);
       }
       throw error;
     }
@@ -893,8 +905,8 @@ export default class SearchBar extends Extension {
     // it allows two grabs on one accelerator, which is the whole reason the
     // conflict check below exists. So this is another extension having taken
     // the name, and picking a different combination would not help.
-    console.warn(
-      `Superbar: mutter refused the keybinding name ` +
+    logWarning(
+      `mutter refused the keybinding name ` +
         `"${TOGGLE_KEYBINDING_NAME}"; another extension has registered it`,
     );
     Main.notify(
@@ -953,9 +965,7 @@ export default class SearchBar extends Extension {
     try {
       this._presentConflictPrompt();
     } catch (error) {
-      console.warn(
-        `Superbar: could not check the shortcut for conflicts: ${error}`,
-      );
+      logWarning(`could not check the shortcut for conflicts: ${error}`);
     }
   }
 
@@ -1013,7 +1023,7 @@ export default class SearchBar extends Extension {
           try {
             if (this._enabled) this._claimShortcut();
           } catch (error) {
-            console.error(`Superbar: could not take over the shortcut: ${error}`);
+            logError(`could not take over the shortcut: ${error}`);
           }
         },
         default: true,
@@ -1455,7 +1465,7 @@ export default class SearchBar extends Extension {
       // Without this the flag stays true while nothing is on screen, and the
       // shortcut reads as dead until it has been pressed a second time to
       // toggle the state back.
-      console.error(`Superbar: failed to open the search bar: ${error}`);
+      logError(`failed to open the search bar: ${error}`);
       this._abandonOpenSearch();
     }
   }
@@ -2945,7 +2955,7 @@ export default class SearchBar extends Extension {
         );
       }
     } catch (e) {
-      console.error(`[Superbar] Action failed (${result.label}): ${e.message}`);
+      logError(`action failed (${result.label}): ${e.message}`);
     }
   }
 
@@ -3686,7 +3696,7 @@ export default class SearchBar extends Extension {
           if (appInfo) appInfo.launch([], null);
         }
       } catch (e) {
-        console.error(`[Superbar] Failed to launch app: ${e}`);
+        logError(`failed to launch app: ${e}`);
       }
     } else if (result.type === "provider") {
       if (result.clipboardText) {
@@ -3698,9 +3708,7 @@ export default class SearchBar extends Extension {
       this._searchProviderManager
         ?.activate(result, global.get_current_time())
         .catch((error) =>
-          console.error(
-            `[Superbar] Search provider activation failed: ${error}`,
-          ),
+          logError(`search provider activation failed: ${error}`),
         );
     } else if (result.type === "weather" || result.type === "file") {
       this._openUri(result.uri);
