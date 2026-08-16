@@ -30,6 +30,18 @@ import { GnomeSearchProviderManager } from "./gnome-search-providers.js";
 import { buildSearchUri, getSearchEngine } from "./search-engines.js";
 import { getNextResultIndex } from "./result-selection.js";
 import {
+  ACTION_SYMBOL_PATTERN,
+  ACTION_WORD_PATTERN,
+  CLIPBOARD_QUERY_PATTERN,
+  cycleQueryMode,
+  getQueryModeByPrefix,
+  getQueryModeCycle,
+  getQueryModeToken,
+  matchTypedQueryMode,
+  parseDictionaryQuery,
+  parseWeatherQuery,
+} from "./query-modes.js";
+import {
   describeAccel,
   formatConflictSummary,
 } from "./keybinding-conflicts.js";
@@ -118,6 +130,10 @@ const QUERY_MODE_PRESENTATION = {
     label: "Calculator",
     iconName: "accessories-calculator-symbolic",
   },
+};
+const MODE_PROMPTS = {
+  weather: "Type a place name",
+  dictionary: "Type a word to define",
 };
 const CURRENCY_ALIASES = {
   yen: "JPY",
@@ -541,7 +557,23 @@ export default class SearchBar extends Extension {
       y_align: Clutter.ActorAlign.CENTER,
     });
 
+    // The active mode's prefix lives in a chip rather than in the entry, so it
+    // stays visible without the user having to edit around it to change the
+    // query.
+    this._modeChip = new St.BoxLayout({
+      style_class: "spotlight-mode-chip",
+      vertical: false,
+      y_align: Clutter.ActorAlign.CENTER,
+      visible: false,
+    });
+    this._modeChipLabel = new St.Label({
+      style_class: "spotlight-mode-chip-label",
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    this._modeChip.add_child(this._modeChipLabel);
+
     this._inputRow.add_child(this._icon);
+    this._inputRow.add_child(this._modeChip);
     this._inputRow.add_child(this._entry);
 
     this._modeIndicator = new St.BoxLayout({
@@ -689,9 +721,11 @@ export default class SearchBar extends Extension {
       this._footerHints.add_child(hint);
       return hint;
     };
+    this._modeHint = createFooterHint("Tab", "Mode");
     this._navigateHint = createFooterHint("↑↓", "Navigate");
     this._openHint = createFooterHint("↵", "Open");
     this._closeHint = createFooterHint("Esc", "Close");
+    this._updateModeHint();
     this._footer.add_child(this._footerHints);
     this._contentLayer.add_child(this._footer);
 
@@ -702,7 +736,15 @@ export default class SearchBar extends Extension {
 
         const key = event.get_key_symbol();
 
-        if (key === Clutter.KEY_Down || key === Clutter.KEY_Tab) {
+        // Shift+Tab arrives as its own keysym, not as Tab with a modifier.
+        if (key === Clutter.KEY_Tab || key === Clutter.KEY_ISO_Left_Tab) {
+          const cycled = this._cycleQueryMode(
+            key === Clutter.KEY_ISO_Left_Tab ? -1 : 1,
+          );
+          return cycled ? Clutter.EVENT_STOP : Clutter.EVENT_PROPAGATE;
+        }
+
+        if (key === Clutter.KEY_Down) {
           const nextIndex = getNextResultIndex(
             this._selectedIndex,
             this._results.length,
@@ -733,8 +775,18 @@ export default class SearchBar extends Extension {
           return Clutter.EVENT_STOP;
         }
 
+        if (
+          key === Clutter.KEY_BackSpace &&
+          this._queryModePrefix &&
+          this._isCaretAtStart()
+        ) {
+          this._setQueryModePrefix("");
+          this._onTextChanged();
+          return Clutter.EVENT_STOP;
+        }
+
         if (key === Clutter.KEY_Escape) {
-          if (this._entry.get_text().length > 0) {
+          if (this._queryText().length > 0) {
             this._resetSearch();
           } else {
             this._closeSearch({ preserveSession: false });
@@ -760,6 +812,7 @@ export default class SearchBar extends Extension {
     this._container.hide();
 
     this._searchOpen = false;
+    this._queryModePrefix = "";
     this._selectedIndex = -1;
     this._results = [];
     this._resultRows = [];
@@ -860,7 +913,10 @@ export default class SearchBar extends Extension {
     SEARCH_SOURCE_SETTING_KEYS.forEach((key) => {
       this._settings.connectObject(
         `changed::${key}`,
-        () => this._refreshCurrentSearch(),
+        () => {
+          this._updateModeHint();
+          this._refreshCurrentSearch();
+        },
         this,
       );
     });
@@ -1139,6 +1195,9 @@ export default class SearchBar extends Extension {
     this._actionsKey = null;
     this._footerSpacer = null;
     this._footerHints = null;
+    this._modeChip = null;
+    this._modeChipLabel = null;
+    this._modeHint = null;
     this._navigateHint = null;
     this._openHint = null;
     this._closeHint = null;
@@ -1204,7 +1263,7 @@ export default class SearchBar extends Extension {
   }
 
   _refreshCurrentSearch() {
-    if (!this._searchOpen || !this._entry?.get_text().trim()) return;
+    if (!this._searchOpen || !this._queryText().trim()) return;
     this._onTextChanged(true);
   }
 
@@ -1329,10 +1388,12 @@ export default class SearchBar extends Extension {
     this._saveRankingHistory();
   }
 
+  // Against the whole query, chip included: a deferred search carries the text
+  // it was scheduled for, and the entry holds only the part after the prefix.
   _isCurrentQuery(text, generation = null) {
     return (
       this._enabled &&
-      this._entry?.get_text().trim() === text &&
+      this._queryText().trim() === text &&
       (generation === null || generation === this._searchGeneration)
     );
   }
@@ -1360,7 +1421,7 @@ export default class SearchBar extends Extension {
   }
 
   _queueFirstResultActivation() {
-    const text = this._entry?.get_text().trim();
+    const text = this._queryText().trim();
     if (!text) return;
 
     this._pendingActivation = {
@@ -1388,7 +1449,7 @@ export default class SearchBar extends Extension {
   }
 
   _saveResumableSession() {
-    const text = this._entry?.get_text() ?? "";
+    const text = this._queryText();
     if (!text.trim()) {
       this._resumableSession = null;
       return false;
@@ -1414,7 +1475,7 @@ export default class SearchBar extends Extension {
     if (
       age < 0 ||
       age > RESUMABLE_SESSION_TTL_MS ||
-      this._entry?.get_text() !== session.text
+      this._queryText() !== session.text
     ) {
       return null;
     }
@@ -1484,9 +1545,7 @@ export default class SearchBar extends Extension {
   _presentSearch() {
     const resumableSession = this._takeResumableSession();
     const resumed = resumableSession !== null;
-    const currentQuery = this._classifyQuery(
-      this._entry.get_text().trim(),
-    );
+    const currentQuery = this._classifyQuery(this._queryText());
 
     if (resumed) {
       if (
@@ -1579,10 +1638,15 @@ export default class SearchBar extends Extension {
     this._copiedClipboardValue = null;
     this._clipboardSearchHistory = null;
 
+    const hadModePrefix = this._queryModePrefix.length > 0;
+    this._setQueryModePrefix("");
+
     if (this._entry.get_text().length > 0) {
       // set_text() emits text-changed synchronously, which invalidates the
       // active generation and cancels pending work in one place.
       this._entry.set_text("");
+    } else if (hadModePrefix) {
+      this._onTextChanged();
     } else {
       this._invalidatePendingSearch({ clearResumableSession: true });
       this._hideResults();
@@ -1592,11 +1656,16 @@ export default class SearchBar extends Extension {
   // --- Search ---
 
   _onTextChanged(preserveSelection = false) {
-    const text = this._entry.get_text().trim();
+    // Promotion rewrites the entry, which re-enters here with the prefix
+    // already lifted into the chip.
+    if (this._promoteTypedQueryMode()) return;
+
+    const raw = this._queryText();
+    const text = raw.trim();
     const generation = this._invalidatePendingSearch({
       clearResumableSession: true,
     });
-    const query = this._classifyQuery(text);
+    const query = this._classifyQuery(raw);
     if (query.kind === "clipboard") {
       // Keep clipboard results in their entry order for this query session.
       // The monitor still updates the persisted MRU order, which becomes
@@ -1611,6 +1680,13 @@ export default class SearchBar extends Extension {
 
     if (text.length === 0) {
       this._hideResults();
+      return;
+    }
+
+    // A mode reached by Tab starts with no argument, and there is nothing to
+    // ask a third-party API for until one is typed.
+    if (query.payload === "" && MODE_PROMPTS[query.kind]) {
+      this._showStatus("empty", MODE_PROMPTS[query.kind]);
       return;
     }
 
@@ -1767,17 +1843,11 @@ export default class SearchBar extends Extension {
   }
 
   _parseWeatherQuery(text) {
-    const match = text
-      .trim()
-      .match(
-        /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+(.+)$/i,
-      );
-    return match ? match[1].trim() : null;
+    return parseWeatherQuery(text);
   }
 
   _parseDictionaryQuery(text) {
-    const match = text.trim().match(/^def(?:ine)?\s+(.+)$/i);
-    return match ? match[1].trim() : null;
+    return parseDictionaryQuery(text);
   }
 
   _classifyQuery(text) {
@@ -1824,17 +1894,18 @@ export default class SearchBar extends Extension {
       return { kind: "actions", payload: actionQuery };
     }
 
+    const trimmed = text.trim();
     if (
       this._isSearchSourceEnabled("calculator-search-enabled") &&
-      this._isMathExpression(text)
+      this._isMathExpression(trimmed)
     ) {
-      const result = evaluateMathExpression(text);
+      const result = evaluateMathExpression(trimmed);
       if (result !== null) {
         return { kind: "calculator", payload: result };
       }
     }
 
-    return { kind: "generic", payload: text };
+    return { kind: "generic", payload: trimmed };
   }
 
   _applyQueryMode(query) {
@@ -1842,6 +1913,76 @@ export default class SearchBar extends Extension {
       QUERY_MODE_PRESENTATION[query.kind] ?? QUERY_MODE_PRESENTATION.generic;
     this._icon.icon_name = mode.iconName;
     if (this._modeLabel) this._modeLabel.text = mode.label;
+  }
+
+  // The chip holds a prefix that would otherwise sit in the entry, so the query
+  // everything downstream reads is the two joined back together.
+  _queryText() {
+    return `${this._queryModePrefix}${this._entry?.get_text() ?? ""}`;
+  }
+
+  // An empty entry reports its caret as -1 rather than 0, and a selection has
+  // to keep Backspace for itself.
+  _isCaretAtStart() {
+    const clutterText = this._entry.clutter_text;
+    if (clutterText.get_selection()) return false;
+    return (
+      this._entry.get_text().length === 0 ||
+      clutterText.get_cursor_position() === 0
+    );
+  }
+
+  _setQueryModePrefix(prefix) {
+    if (this._queryModePrefix === prefix) return;
+
+    this._queryModePrefix = prefix;
+    const token = getQueryModeToken(prefix);
+    if (this._modeChipLabel) this._modeChipLabel.text = token;
+    if (this._modeChip) this._modeChip.visible = token.length > 0;
+    if (this._entry) this._entry.hint_text = getQueryModeByPrefix(prefix).hint;
+  }
+
+  _cycleQueryMode(direction) {
+    const next = cycleQueryMode({
+      text: this._entry.get_text(),
+      kind: this._classifyQuery(this._queryText()).kind,
+      direction,
+      isModeEnabled: (key) => this._isSearchSourceEnabled(key),
+    });
+    if (next === null) return false;
+
+    this._setQueryModePrefix(next.prefix);
+    // set_text only fires the search when the text actually changes, so an
+    // unchanged entry has to be searched by hand.
+    if (next.query === this._entry.get_text()) {
+      this._onTextChanged();
+    } else {
+      this._entry.set_text(next.query);
+    }
+    this._entry.clutter_text.set_cursor_position(next.query.length);
+    return true;
+  }
+
+  // Typing "clip " should arrive at the same place as pressing Tab.
+  _promoteTypedQueryMode() {
+    if (this._queryModePrefix) return false;
+
+    const typed = matchTypedQueryMode(this._entry.get_text(), (key) =>
+      this._isSearchSourceEnabled(key),
+    );
+    if (typed === null) return false;
+
+    this._setQueryModePrefix(typed.mode.prefix);
+    this._entry.set_text(typed.query);
+    this._entry.clutter_text.set_cursor_position(typed.query.length);
+    return true;
+  }
+
+  // A cycle of one leaves Tab with nothing to do, so stop advertising it.
+  _updateModeHint() {
+    if (!this._modeHint) return;
+    this._modeHint.visible =
+      getQueryModeCycle((key) => this._isSearchSourceEnabled(key)).length > 1;
   }
 
   _scheduleCurrentQuery(text, generation, delay, callback) {
@@ -1976,9 +2117,7 @@ export default class SearchBar extends Extension {
 
   _parseClipboardQuery(text) {
     const normalized = text.trim();
-    const match = normalized.match(
-      /^(?:clipboard|clip|history)(?:(?::|\s+)(.*))?$/i,
-    );
+    const match = normalized.match(CLIPBOARD_QUERY_PATTERN);
     if (!match) return null;
     return (match[1] ?? "").trim();
   }
@@ -2148,7 +2287,7 @@ export default class SearchBar extends Extension {
       return;
     }
 
-    const query = this._parseClipboardQuery(this._entry.get_text().trim());
+    const query = this._parseClipboardQuery(this._queryText().trim());
     if (query !== null) this._showResults([]);
   }
 
@@ -2210,7 +2349,7 @@ export default class SearchBar extends Extension {
       this._searchOpen &&
       this._isSearchSourceEnabled("clipboard-search-enabled")
     ) {
-      const query = this._parseClipboardQuery(this._entry.get_text().trim());
+      const query = this._parseClipboardQuery(this._queryText().trim());
       if (query !== null) {
         this._showResults(this._searchClipboardHistory(query), true);
       }
@@ -2331,12 +2470,10 @@ export default class SearchBar extends Extension {
     const normalized = text.trim();
     if (normalized === ">") return "";
 
-    const symbolMatch = normalized.match(/^>\s*(.*)$/);
+    const symbolMatch = normalized.match(ACTION_SYMBOL_PATTERN);
     if (symbolMatch) return symbolMatch[1].trim();
 
-    const prefixMatch = normalized.match(
-      /^(?:command|cmd|action)(?:(?::|\s+)(.*))?$/i,
-    );
+    const prefixMatch = normalized.match(ACTION_WORD_PATTERN);
     if (prefixMatch) return (prefixMatch[1] ?? "").trim();
 
     return null;
@@ -3320,7 +3457,7 @@ export default class SearchBar extends Extension {
         : null;
 
     if (results.length === 0) {
-      this._showNoResults(this._entry?.get_text().trim() ?? "");
+      this._showNoResults(this._queryText().trim());
       return;
     }
 
@@ -4160,6 +4297,13 @@ export default class SearchBar extends Extension {
         `background-color: ${rgba(palette.accent, 0.11)}; ` +
         `color: ${rgba(palette.accentForeground, 0.82)};`,
     );
+    this._modeChip?.set_style(
+      `border-color: ${rgba(palette.accent, 0.18)}; ` +
+        `background-color: ${rgba(palette.accent, 0.14)};`,
+    );
+    this._modeChipLabel?.set_style(
+      `color: ${rgba(palette.accentForeground, 0.86)};`,
+    );
     this._updateSelection();
   }
 
@@ -4168,6 +4312,8 @@ export default class SearchBar extends Extension {
     this._modeDot?.set_style(null);
     this._statusSpinner?.set_style(null);
     this._actionsKey?.set_style(null);
+    this._modeChip?.set_style(null);
+    this._modeChipLabel?.set_style(null);
     this._resultRows?.forEach((row) => row.set_style(null));
   }
 

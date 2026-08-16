@@ -52,6 +52,7 @@ syntax:
 	@node --input-type=module --check < appearance.js
 	@node --input-type=module --check < app-search.js
 	@node --input-type=module --check < search-provider-config.js
+	@node --input-type=module --check < query-modes.js
 	@node --input-type=module --check < keybinding-conflicts.js
 	@node --input-type=module --check < keybinding-settings.js
 	@node --input-type=module --check < tests/prefs-gtk.js
@@ -146,6 +147,7 @@ pack: check
 		--extra-source=search-provider-config.js \
 		--extra-source=gnome-search-providers.js \
 		--extra-source=search-engines.js --extra-source=result-selection.js \
+		--extra-source=query-modes.js \
 		--extra-source=keybinding-conflicts.js \
 		--extra-source=keybinding-settings.js .
 	@printf "Built %s\n" "$(BUILD_ARCHIVE)"

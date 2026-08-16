@@ -92,6 +92,22 @@
     font-weight: 500;
 }
 
+/* The chip stands in for text the user would otherwise have typed, so it is
+ * sized against the entry rather than the small footer keys. */
+.spotlight-mode-chip {
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid rgba(74, 158, 226, 0.16);
+    border-radius: 10px;
+    background-color: rgba(74, 158, 226, 0.12);
+}
+
+.spotlight-mode-chip-label {
+    color: rgba(20, 72, 120, 0.82);
+    font-size: 17px;
+    font-weight: 500;
+}
+
 .spotlight-divider {
     height: 1px;
     background-color: rgba(38, 38, 38, 0.12);
@@ -407,6 +423,15 @@
 
 .dark-mode .spotlight-mode-indicator {
     background-color: transparent;
+}
+
+.dark-mode .spotlight-mode-chip {
+    border-color: rgba(115, 194, 249, 0.16);
+    background-color: rgba(78, 168, 235, 0.16);
+}
+
+.dark-mode .spotlight-mode-chip-label {
+    color: rgba(150, 210, 255, 0.88);
 }
 
 .dark-mode .spotlight-mode-inner {

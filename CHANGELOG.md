@@ -8,6 +8,28 @@ Releases are cut by pushing a `v*` tag, which triggers the packaging workflow.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-16
+
+### Added
+
+- Tab cycles the search mode between All results, Clipboard, System Actions,
+  Weather, and Dictionary; Shift+Tab cycles back. Tab previously duplicated
+  the Down arrow. Modes disabled in Search Sources are left out of the cycle,
+  and currency and the calculator stay out of it because neither has a prefix
+  to switch into — both are still recognized from what is typed.
+- The active mode's prefix is shown as a chip in front of the search field
+  instead of as text inside it, so the query survives a mode change and the
+  shortcut that reaches the mode stays visible. Typing a prefix turns it into
+  the same chip, and Backspace at the start of the field removes it. The
+  placeholder text follows the mode.
+- Weather and dictionary now accept their keyword before an argument is typed,
+  which is the state Tab leaves them in, and prompt for what is missing rather
+  than calling out to a third-party API with nothing to look up. The keyword
+  on its own is unchanged and still searches normally, so the Weather app is
+  still found by name.
+- The footer lists `Tab Mode` alongside the existing hints, and hides it when
+  every mode but All results has been disabled.
+
 ### Security
 
 - The clipboard history file is created with `0600` permissions instead of
@@ -124,7 +146,8 @@ Initial public release.
 - Bottom-positioned results layout and configurable divider visibility.
 - Showcase rendering script with a high-resolution render scale option.
 
-[Unreleased]: https://github.com/Furkan-rgb/superbar/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/Furkan-rgb/superbar/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Furkan-rgb/superbar/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/Furkan-rgb/superbar/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Furkan-rgb/superbar/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/Furkan-rgb/superbar/compare/v1.1.0...v1.1.1

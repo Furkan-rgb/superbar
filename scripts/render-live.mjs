@@ -51,6 +51,7 @@ const EXTENSION_SOURCES = [
   "gnome-search-providers.js",
   "search-engines.js",
   "result-selection.js",
+  "query-modes.js",
   "keybinding-conflicts.js",
   "keybinding-settings.js",
 ];

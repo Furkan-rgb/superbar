@@ -11,37 +11,38 @@ Superbar preferences.
 
 ## Screenshots
 
-|                                                                    |                                                                           |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| ![Dark empty state](renders/dark-empty.png)                        | ![Light search results](renders/light-search.png)                         |
-| ![Dark search results](renders/dark-search.png)                    | ![Dark bottom-positioned results](renders/dark-bottom-search.png)         |
-| ![Light clipboard results](renders/light-clipboard.png)            | ![Dark clipboard copied state](renders/dark-clipboard-copied.png)         |
-| ![Light calculator result](renders/light-calculator.png)           | ![Dark weather result](renders/dark-weather.png)                          |
+|                                                          |                                                                   |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| ![Dark empty state](renders/dark-empty.png)              | ![Light search results](renders/light-search.png)                 |
+| ![Dark search results](renders/dark-search.png)          | ![Dark bottom-positioned results](renders/dark-bottom-search.png) |
+| ![Light clipboard results](renders/light-clipboard.png)  | ![Dark clipboard copied state](renders/dark-clipboard-copied.png) |
+| ![Light calculator result](renders/light-calculator.png) | ![Dark weather result](renders/dark-weather.png)                  |
 
 ---
 
 ## Features
 
-| Feature                   | How to use                                                             |
-| ------------------------- | ---------------------------------------------------------------------- |
-| **App Launcher**          | Type an app name to launch it or focus it if it is already open        |
-| **Settings Search**       | Find and open panels such as Displays or Color Management              |
-| **GNOME Search Providers** | Include results supplied by Settings, Files, Calendar, and other apps |
-| **Window Switcher**       | Search window titles, including windows on other workspaces            |
-| **File Search**           | Search common folders and files in the LocalSearch or Tracker index    |
-| **Clipboard History**     | Start with `clip`, `clipboard`, or `history`                            |
-| **Weather**               | Try `weather Amsterdam`                                                 |
-| **Calculator**            | Type `2 * (3 + 4)`, then press Enter or click the result to copy it     |
-| **Currency Converter**    | Type `100 USD to EUR`, then press Enter or click the result to copy it  |
-| **Dictionary**            | `define word`                                                          |
-| **Web Search**            | Open unmatched searches with your preferred search engine              |
-| **System Actions**        | Start with `>`, `cmd`, `command`, or `action`                          |
-| **Resumable Searches**    | Reopen the bar within five minutes to resume your previous search       |
-| **Adaptive Ranking**      | Apps and actions you choose can rank higher; learned ranking is resettable |
-| **Multi-monitor Support** | Opens on the monitor you are currently using                           |
-| **Clipboard Controls**    | Toggle monitoring, set the history limit, or clear saved history       |
-| **Appearance Settings**   | Pick the theme, colors, opacity, width, position, and result count      |
-| **Search Source Controls** | Enable or disable each built-in source from Superbar preferences      |
+| Feature                    | How to use                                                                       |
+| -------------------------- | -------------------------------------------------------------------------------- |
+| **App Launcher**           | Type an app name to launch it or focus it if it is already open                  |
+| **Settings Search**        | Find and open panels such as Displays or Color Management                        |
+| **GNOME Search Providers** | Include results supplied by Settings, Files, Calendar, and other apps            |
+| **Window Switcher**        | Search window titles, including windows on other workspaces                      |
+| **File Search**            | Search common folders and files in the LocalSearch or Tracker index              |
+| **Clipboard History**      | Start with `clip`, `clipboard`, or `history`                                     |
+| **Weather**                | Try `weather Amsterdam`                                                          |
+| **Calculator**             | Type `2 * (3 + 4)`, then press Enter or click the result to copy it              |
+| **Currency Converter**     | Type `100 USD to EUR`, then press Enter or click the result to copy it           |
+| **Dictionary**             | `define word`                                                                    |
+| **Web Search**             | Open unmatched searches with your preferred search engine                        |
+| **System Actions**         | Start with `>`, `cmd`, `command`, or `action`                                    |
+| **Mode Switching**         | Tab cycles All results, Clipboard, System Actions, Weather, Dictionary          |
+| **Resumable Searches**     | Reopen the bar within five minutes to resume your previous search                |
+| **Adaptive Ranking**       | Apps and actions you choose can rank higher; learned ranking is resettable       |
+| **Multi-monitor Support**  | Opens on the monitor you are currently using                                     |
+| **Clipboard Controls**     | Toggle monitoring, set the history limit, or clear saved history                 |
+| **Appearance Settings**    | Pick the theme, colors, opacity, width, position, and result count               |
+| **Search Source Controls** | Enable or disable each built-in source from Superbar preferences                 |
 
 ---
 
@@ -82,15 +83,15 @@ Log out and back in if this is the first time installing.
 Superbar opens with **Alt+Space**. Change it from the General page in
 preferences: click the edit button and press the combination you want.
 
-Alt+Space is also GNOME's default for *Activate the window menu*, and two
+Alt+Space is also GNOME's default for _Activate the window menu_, and two
 shortcuts sharing one combination behave unpredictably — which one responds can
 depend on what is focused. On a stock GNOME this is true of Superbar's own
 default, so a fresh install starts out in conflict, and a launcher that opens
 only sometimes is what that looks like.
 
 Superbar checks its shortcut when it starts. If something else claims the same
-combination, it asks: *Use for Superbar* clears the other assignment, *Choose
-Another* opens preferences, and *Not Now* leaves everything alone. The question
+combination, it asks: _Use for Superbar_ clears the other assignment, _Choose
+Another_ opens preferences, and _Not Now_ leaves everything alone. The question
 waits until the session is ready rather than interrupting login, and once
 answered for a given shortcut it is not asked again — picking a different
 shortcut that also collides asks about that one.
@@ -99,7 +100,7 @@ Preferences shows the same information: a warning icon appears next to a
 shortcut that is currently in conflict, and assigning a combination that is
 already taken names the conflict and offers to replace it. Nothing is ever
 cleared without being asked, and anything that was cleared can be put back with
-*Restore* in the same group — whichever route cleared it.
+_Restore_ in the same group — whichever route cleared it.
 
 Conflict detection reads the shortcut schemas used by GNOME Shell, Mutter, the
 window manager, and system media keys, including custom shortcuts. It cannot
@@ -148,6 +149,15 @@ results open upward and the footer remains below them. Center is the default.
 Search results stay in one list rather than being split into tabs. The small
 label beside the search field shows when Superbar has recognized something like
 a clipboard, calculator, weather, dictionary, currency, or system-action query.
+Tab moves between All results, Clipboard, System Actions, Weather, and
+Dictionary; Shift+Tab goes back. The mode's prefix becomes a chip in front of
+the search field rather than text inside it, so anything already typed is kept
+and the shortcut that reaches the mode stays visible. Typing a prefix yourself
+turns it into the same chip, and Backspace at the start of the field removes
+it. Modes turned off in Search Sources are skipped, and the Tab hint
+disappears when only All results is left. Currency and the calculator have no
+prefix to show, so they are recognized from what you type rather than switched
+into.
 Web searches use Google by default. This can be changed in settings to
 DuckDuckGo, Bing, Brave Search, Ecosia, or Startpage.
 
