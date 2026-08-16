@@ -12,6 +12,8 @@ import Soup from "gi://Soup";
 import GLib from "gi://GLib";
 import Pango from "gi://Pango";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
+import * as ModalDialog from "resource:///org/gnome/shell/ui/modalDialog.js";
+import * as Dialog from "resource:///org/gnome/shell/ui/dialog.js";
 import * as SystemActions from "resource:///org/gnome/shell/misc/systemActions.js";
 import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
@@ -27,7 +29,20 @@ import {
 import { GnomeSearchProviderManager } from "./gnome-search-providers.js";
 import { buildSearchUri, getSearchEngine } from "./search-engines.js";
 import { getNextResultIndex } from "./result-selection.js";
+import {
+  describeAccel,
+  formatConflictSummary,
+} from "./keybinding-conflicts.js";
+import { findConflictsFor, replaceConflicts } from "./keybinding-settings.js";
 
+// Mutter keys its keybinding table on this name process-wide, so another
+// extension registering the same name makes ours fail. It cannot simply be
+// made unique: mutter also reads the accelerator from the GSettings key of the
+// same name, so renaming it means renaming the schema key and discarding every
+// shortcut a user has already set.
+const CONFLICT_PROMPT_RETRY_SECONDS = 2;
+const CONFLICT_PROMPT_MAX_ATTEMPTS = 30;
+const TOGGLE_KEYBINDING_NAME = "toggle-shortcut";
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
 const RESULTS_REVEAL_ANIMATION_MS = 85;
@@ -348,6 +363,7 @@ export default class SearchBar extends Extension {
     // silently having no way to open.
     this._keybindingAdded = false;
     this._ensureKeybinding();
+    this._queueConflictPrompt();
 
     this._shellSettings = St.Settings.get();
     this._themeContext = St.ThemeContext.get_for_stage(global.stage);
@@ -789,12 +805,18 @@ export default class SearchBar extends Extension {
   // only ever has to register once. It is called again when the shortcut
   // changes so that a combination rejected at startup can still take effect
   // once the user picks a different one.
+  // GSettings keybinding keys are always lists; Superbar uses only the first
+  // entry, and an empty list means the shortcut was turned off.
+  _toggleAccel() {
+    const [accel = ""] = this._settings.get_strv("toggle-shortcut");
+    return accel;
+  }
+
   _ensureKeybinding() {
     if (this._keybindingAdded) return;
 
-    const accels = this._settings.get_strv("toggle-shortcut");
     const action = Main.wm.addKeybinding(
-      "toggle-shortcut",
+      TOGGLE_KEYBINDING_NAME,
       this._settings,
       Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
       Shell.ActionMode.NORMAL |
@@ -809,25 +831,189 @@ export default class SearchBar extends Extension {
     }
 
     // An empty list means the user deliberately disabled the shortcut.
-    if (accels.length === 0) return;
+    const accel = this._toggleAccel();
+    if (!accel) return;
 
-    const accel = accels[0];
+    // Mutter refuses only when a keybinding of the same NAME already exists;
+    // it allows two grabs on one accelerator, which is the whole reason the
+    // conflict check below exists. So this is another extension having taken
+    // the name, and picking a different combination would not help.
     console.warn(
-      `Superbar: failed to bind the shortcut ${accel}; another shortcut or ` +
-        `application is likely already using it`,
+      `Superbar: mutter refused the keybinding name ` +
+        `"${TOGGLE_KEYBINDING_NAME}"; another extension has registered it`,
     );
     Main.notify(
       "Superbar could not register its shortcut",
-      `${accel} is already in use. Choose a different shortcut in Superbar preferences.`,
+      `${describeAccel(accel)} could not be bound because another extension ` +
+        `registered the same keybinding name.`,
+    );
+  }
+
+  // GNOME assigns Alt+Space to the window menu and Superbar ships the same
+  // default, and mutter lets both grabs exist at once — so which one answers
+  // depends on what has focus, and the launcher reads as though it only works
+  // sometimes. Preferences shows the conflict, but someone who never opens
+  // preferences has no way to learn any of this, so say it once here.
+  _queueConflictPrompt() {
+    // Shell.ActionMode.NONE means the session cannot be interrupted right now:
+    // it is still starting, or something holds a modal grab — Alt+Tab, a drag,
+    // the lock screen. Opening a dialog then is worse than it sounds, because
+    // a modal grabs input while the Shell's uiGroup is still transparent and
+    // the user faces a dialog they cannot see.
+    //
+    // Waiting on startup-complete is not enough: that signal fires once per
+    // Shell process, so an extension enabled later — by the Extensions app, or
+    // mid-drag — would hook a signal that has already gone and never ask at
+    // all. Retrying a few times covers every case with public API only.
+    let attempts = 0;
+    this._conflictPromptId = GLib.timeout_add_seconds(
+      GLib.PRIORITY_DEFAULT,
+      CONFLICT_PROMPT_RETRY_SECONDS,
+      () => {
+        if (!this._enabled) {
+          this._conflictPromptId = null;
+          return GLib.SOURCE_REMOVE;
+        }
+
+        if (Main.actionMode === Shell.ActionMode.NONE) {
+          if (++attempts < CONFLICT_PROMPT_MAX_ATTEMPTS)
+            return GLib.SOURCE_CONTINUE;
+
+          // Someone has held a grab for minutes. Asking is not urgent enough
+          // to keep a timer alive for the rest of the session.
+          this._conflictPromptId = null;
+          return GLib.SOURCE_REMOVE;
+        }
+
+        this._conflictPromptId = null;
+        this._runConflictCheck();
+        return GLib.SOURCE_REMOVE;
+      },
+    );
+  }
+
+  _runConflictCheck() {
+    if (!this._enabled) return;
+
+    try {
+      this._presentConflictPrompt();
+    } catch (error) {
+      console.warn(
+        `Superbar: could not check the shortcut for conflicts: ${error}`,
+      );
+    }
+  }
+
+  _presentConflictPrompt() {
+    const accel = this._toggleAccel();
+    if (!accel) return;
+
+    const conflicts = findConflictsFor(accel);
+    if (conflicts.length === 0) return;
+
+    // Locking the screen disables the extension and unlocking enables it
+    // again, running this check afresh. Without remembering what was already
+    // asked, a conflict someone chose to leave alone would put this dialog on
+    // screen after every unlock. Picking a different shortcut asks again.
+    if (this._settings.get_string("conflict-prompt-accel") === accel) return;
+
+    // A banner is too easy to miss for something that decides whether the
+    // launcher opens at all, and leaving it unanswered leaves the shortcut in
+    // the state that made it look broken. Ask outright instead.
+    const dialog = new ModalDialog.ModalDialog({ destroyOnClose: true });
+    dialog.contentLayout.add_child(
+      new Dialog.MessageDialogContent({
+        title: `${describeAccel(accel)} is already in use`,
+        description:
+          `${describeAccel(accel)} opens Superbar. ` +
+          `${formatConflictSummary(conflicts)}.\n\n` +
+          `While both are assigned, which one responds depends on what has ` +
+          `focus, so Superbar will seem to open only sometimes. Anything ` +
+          `cleared here can be put back from Superbar preferences.`,
+      }),
+    );
+
+    dialog.setButtons([
+      // Not offered as "keep both": holding both is the broken state that
+      // makes the launcher look unreliable, and naming it as a choice invites
+      // people straight into it.
+      {
+        label: "Not Now",
+        action: () => dialog.close(),
+        key: Clutter.KEY_Escape,
+      },
+      {
+        label: "Choose Another",
+        action: () => {
+          dialog.close();
+          if (this._enabled) this.openPreferences();
+        },
+      },
+      {
+        label: "Use for Superbar",
+        action: () => {
+          dialog.close();
+          // Runs from a Clutter signal handler: anything thrown here would
+          // escape into the Shell's main loop.
+          try {
+            if (this._enabled) this._claimShortcut();
+          } catch (error) {
+            console.error(`Superbar: could not take over the shortcut: ${error}`);
+          }
+        },
+        default: true,
+      },
+    ]);
+
+    // The dialog parents itself into the Shell's modalDialogGroup, not into
+    // anything this extension owns, so disable() has to be able to close it —
+    // locking the screen disables the extension with the dialog still up.
+    this._conflictDialog = dialog;
+    dialog.connect("closed", () => {
+      this._conflictDialog = null;
+    });
+
+    dialog.open();
+
+    // Recorded only once the question is actually on screen: committing before
+    // that would let an interruption suppress it permanently.
+    this._settings.set_string("conflict-prompt-accel", accel);
+  }
+
+  // Rescans rather than reusing the conflicts the dialog was built from: the
+  // dialog can stay on screen for a long time, and acting on what was true
+  // when it opened could clear a shortcut the user has since changed.
+  _claimShortcut() {
+    const accel = this._toggleAccel();
+    if (!accel) return;
+
+    const conflicts = findConflictsFor(accel);
+    if (conflicts.length === 0) return;
+
+    const cleared = replaceConflicts(this._settings, conflicts);
+    if (cleared.length === 0) {
+      Main.notify(
+        "Superbar could not take over the shortcut",
+        `${describeAccel(accel)} could not be cleared. Choose a different shortcut in Superbar preferences.`,
+      );
+      return;
+    }
+
+    Main.notify(
+      `${describeAccel(accel)} now opens only Superbar`,
+      "The shortcuts that were cleared can be put back from Superbar preferences.",
     );
   }
 
   disable() {
     this._enabled = false;
     if (this._keybindingAdded) {
-      Main.wm.removeKeybinding("toggle-shortcut");
+      Main.wm.removeKeybinding(TOGGLE_KEYBINDING_NAME);
       this._keybindingAdded = false;
     }
+    this._conflictDialog?.close();
+    this._conflictDialog = null;
+    this._removeSource("_conflictPromptId");
     this._removeSource("_clipboardPollId");
     this._cancelPendingSearch();
     this._removeSource("_selectionScrollTimeoutId");
@@ -1199,6 +1385,10 @@ export default class SearchBar extends Extension {
 
   _abandonOpenSearch() {
     this._searchOpen = false;
+    // The entry may already hold stage key focus; leaving it there once the
+    // container is hidden swallows every keystroke until something else takes
+    // focus back.
+    global.stage.set_key_focus(null);
     this._destroyClickShield();
     this._container?.remove_all_transitions();
     this._container?.hide();

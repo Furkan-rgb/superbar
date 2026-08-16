@@ -84,11 +84,22 @@ preferences: click the edit button and press the combination you want.
 
 Alt+Space is also GNOME's default for *Activate the window menu*, and two
 shortcuts sharing one combination behave unpredictably — which one responds can
-depend on what is focused. Preferences detects this. When the combination you
-press is already assigned to a GNOME shortcut, Superbar names the conflict and
-offers to replace it; a warning icon appears next to a shortcut that is
-currently in conflict. Nothing is cleared unless you choose *Replace*, and
-anything that was cleared can be put back with *Restore* in the same group.
+depend on what is focused. On a stock GNOME this is true of Superbar's own
+default, so a fresh install starts out in conflict, and a launcher that opens
+only sometimes is what that looks like.
+
+Superbar checks its shortcut when it starts. If something else claims the same
+combination, it asks: *Use for Superbar* clears the other assignment, *Choose
+Another* opens preferences, and *Not Now* leaves everything alone. The question
+waits until the session is ready rather than interrupting login, and once
+answered for a given shortcut it is not asked again — picking a different
+shortcut that also collides asks about that one.
+
+Preferences shows the same information: a warning icon appears next to a
+shortcut that is currently in conflict, and assigning a combination that is
+already taken names the conflict and offers to replace it. Nothing is ever
+cleared without being asked, and anything that was cleared can be put back with
+*Restore* in the same group — whichever route cleared it.
 
 Conflict detection reads the shortcut schemas used by GNOME Shell, Mutter, the
 window manager, and system media keys, including custom shortcuts. It cannot

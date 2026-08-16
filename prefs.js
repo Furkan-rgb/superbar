@@ -11,17 +11,17 @@ import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/
 import { SURFACE_COLOR_PRESETS } from "./appearance.js";
 import { SEARCH_ENGINES } from "./search-engines.js";
 import {
-  CONFLICT_SOURCES,
-  CUSTOM_KEYBINDING_SCHEMA_ID,
-  MEDIA_KEYS_SCHEMA_ID,
-  decodeReplacedBindings,
+  describeAccel,
   describeAccelRejection,
-  encodeReplacedBindings,
-  findAccelConflicts,
   formatConflict,
   formatConflictSummary,
-  mergeReplacedBindings,
 } from "./keybinding-conflicts.js";
+import {
+  findConflictsFor,
+  readReplacedBindings,
+  replaceConflicts,
+  restoreReplacedBindings,
+} from "./keybinding-settings.js";
 
 function addRoundedRectangle(cr, x, y, width, height, radius) {
   cr.newSubPath();
@@ -126,7 +126,7 @@ function addSwitchSettingRow(group, settings, key, title, subtitle) {
   return row;
 }
 
-// ── Shortcut conflicts ──────────────────────────────────────────────────────
+// ── Shortcut editing ────────────────────────────────────────────────────────
 
 const MODIFIER_KEYVALS = new Set(
   [
@@ -148,203 +148,8 @@ const MODIFIER_KEYVALS = new Set(
     Gdk.KEY_Shift_Lock,
     Gdk.KEY_Num_Lock,
     Gdk.KEY_Scroll_Lock,
-  ].filter((keyval) => keyval !== undefined),
+  ],
 );
-
-function lookupSchema(schemaId) {
-  return Gio.SettingsSchemaSource.get_default().lookup(schemaId, true);
-}
-
-function settingsForSchema(schemaId, path = null) {
-  const schema = lookupSchema(schemaId);
-  if (!schema) return null;
-
-  try {
-    return new Gio.Settings(
-      path ? { settings_schema: schema, path } : { settings_schema: schema },
-    );
-  } catch (_e) {
-    return null;
-  }
-}
-
-// User-defined shortcuts live in a relocatable schema, one instance per path
-// listed in the media-keys settings, and store a single accelerator string
-// rather than a list.
-function collectCustomKeybindings() {
-  const mediaKeys = settingsForSchema(MEDIA_KEYS_SCHEMA_ID);
-  const customSchema = lookupSchema(CUSTOM_KEYBINDING_SCHEMA_ID);
-  if (!mediaKeys || !customSchema) return [];
-  if (!mediaKeys.settings_schema.has_key("custom-keybindings")) return [];
-
-  const bindings = [];
-
-  for (const path of mediaKeys.get_strv("custom-keybindings")) {
-    const custom = settingsForSchema(CUSTOM_KEYBINDING_SCHEMA_ID, path);
-    if (!custom) continue;
-
-    const accel = custom.get_string("binding");
-    if (!accel) continue;
-
-    bindings.push({
-      schemaId: CUSTOM_KEYBINDING_SCHEMA_ID,
-      path,
-      label: "Custom Shortcut",
-      key: "binding",
-      summary: custom.get_string("name") || "Custom shortcut",
-      type: "s",
-      accels: [accel],
-      values: [accel],
-    });
-  }
-
-  return bindings;
-}
-
-// `accels` is what conflict matching narrows down; `values` keeps the full
-// original list so that clearing one accelerator leaves the others in place.
-function collectSystemKeybindings() {
-  const bindings = [];
-
-  for (const { schemaId, label } of CONFLICT_SOURCES) {
-    const settings = settingsForSchema(schemaId);
-    if (!settings) continue;
-
-    const schema = settings.settings_schema;
-
-    for (const key of schema.list_keys()) {
-      const value = settings.get_value(key);
-      // Only string lists hold accelerators; everything else in these schemas
-      // is unrelated configuration.
-      if (value.get_type_string() !== "as") continue;
-
-      const accels = value.get_strv().filter((accel) => accel);
-      if (accels.length === 0) continue;
-
-      let summary = key;
-      try {
-        summary = schema.get_key(key).get_summary() || key;
-      } catch (_e) {
-        summary = key;
-      }
-
-      bindings.push({
-        schemaId,
-        label,
-        key,
-        summary,
-        type: "as",
-        accels,
-        values: accels,
-      });
-    }
-  }
-
-  return [...bindings, ...collectCustomKeybindings()];
-}
-
-function parseAccel(accel) {
-  try {
-    const [ok, keyval, mods] = Gtk.accelerator_parse(accel);
-    if (!ok || !keyval) return null;
-
-    return { keyval, mods };
-  } catch (_e) {
-    return null;
-  }
-}
-
-// Compares what the shortcut resolves to rather than how it was spelled, so
-// "<Alt>space" and "<alt>Space" are recognised as the same combination.
-function isSameAccel(a, b) {
-  const left = parseAccel(a);
-  const right = parseAccel(b);
-  if (!left || !right) return false;
-
-  return left.keyval === right.keyval && left.mods === right.mods;
-}
-
-function findConflictsFor(accel) {
-  if (!accel) return [];
-
-  return findAccelConflicts(accel, collectSystemKeybindings(), isSameAccel);
-}
-
-function clearConflictingBinding(binding) {
-  const settings = settingsForSchema(binding.schemaId, binding.path ?? null);
-  if (!settings) return null;
-
-  const record = {
-    schemaId: binding.schemaId,
-    key: binding.key,
-    label: binding.label,
-    summary: binding.summary,
-    type: binding.type,
-    value: binding.type === "s" ? binding.values[0] : binding.values,
-  };
-  if (binding.path) record.path = binding.path;
-
-  try {
-    if (binding.type === "s") {
-      settings.set_string(binding.key, "");
-    } else {
-      settings.set_strv(
-        binding.key,
-        binding.values.filter((accel) => !binding.accels.includes(accel)),
-      );
-    }
-  } catch (_e) {
-    return null;
-  }
-
-  return record;
-}
-
-function restoreReplacedBinding(record) {
-  const settings = settingsForSchema(record.schemaId, record.path ?? null);
-  if (!settings) return false;
-
-  try {
-    if (record.type === "s") {
-      settings.set_string(record.key, record.value ?? "");
-    } else {
-      settings.set_strv(record.key, record.value ?? []);
-    }
-  } catch (_e) {
-    return false;
-  }
-
-  return true;
-}
-
-// Adw.AlertDialog replaced Adw.MessageDialog in libadwaita 1.5; both expose the
-// same response API, only the way they are presented differs.
-function hasAlertDialog() {
-  try {
-    return Adw.AlertDialog !== undefined;
-  } catch (_e) {
-    return false;
-  }
-}
-
-function presentAlert(parent, heading, body, configure) {
-  const useAlertDialog = hasAlertDialog();
-  const alert = useAlertDialog
-    ? new Adw.AlertDialog({ heading, body })
-    : new Adw.MessageDialog({
-        heading,
-        body,
-        modal: true,
-        transient_for: parent?.get_root?.() ?? null,
-      });
-
-  configure(alert);
-
-  if (useAlertDialog) alert.present(parent);
-  else alert.present();
-
-  return alert;
-}
 
 // ── Keybinding row ──────────────────────────────────────────────────────────
 
@@ -431,7 +236,10 @@ const KeybindingRow = GObject.registerClass(
       });
 
       const headerBar = new Adw.HeaderBar({ show_end_title_buttons: false });
-      const cancelBtn = new Gtk.Button({ label: "Cancel" });
+      // Every keystroke here is a shortcut candidate, so nothing in the dialog
+      // may take focus: a focused button turns Space and Enter into a click
+      // instead of a capture.
+      const cancelBtn = new Gtk.Button({ label: "Cancel", focusable: false });
       cancelBtn.connect("clicked", () => dialog.destroy());
       headerBar.pack_start(cancelBtn);
 
@@ -454,7 +262,26 @@ const KeybindingRow = GObject.registerClass(
       content.append(box);
       dialog.set_content(content);
 
+      // The compositor owns combinations like Alt+Space, and would act on them
+      // instead of delivering them here — which would make exactly the
+      // shortcuts this dialog needs to detect impossible to press. Inhibiting
+      // lasts only while the dialog is up.
+      let inhibitedSurface = null;
+      dialog.connect("map", () => {
+        inhibitedSurface = dialog.get_surface();
+        inhibitedSurface?.inhibit_system_shortcuts(null);
+        this._inhibitedSurface = inhibitedSurface;
+      });
+      dialog.connect("unmap", () => {
+        inhibitedSurface?.restore_system_shortcuts();
+        inhibitedSurface = null;
+        this._inhibitedSurface = null;
+      });
+
       const controller = new Gtk.EventControllerKey();
+      // Capture phase, so the dialog sees the key before any focused widget
+      // gets a chance to consume it.
+      controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
       controller.connect("key-pressed", (_ctrl, keyval, keycode, state) => {
         if (keyval === Gdk.KEY_Escape) {
           dialog.destroy();
@@ -500,16 +327,6 @@ const KeybindingRow = GObject.registerClass(
       dialog.present();
     }
 
-    _applyAccel(accel) {
-      const conflicts = findConflictsFor(accel);
-      if (conflicts.length === 0) {
-        this._setAccel(accel);
-        return;
-      }
-
-      this._confirmReplace(accel, conflicts);
-    }
-
     _setAccel(accel) {
       this._settings.set_strv(this._key, [accel]);
       this.syncState();
@@ -519,49 +336,43 @@ const KeybindingRow = GObject.registerClass(
     // silently would rewrite the user's configuration behind their back, and it
     // would still miss the conflicts we cannot see: shortcuts owned by other
     // extensions, and applications that grab keys for themselves.
-    _confirmReplace(accel, conflicts) {
+    _applyAccel(accel) {
+      const conflicts = findConflictsFor(accel);
+      if (conflicts.length === 0) {
+        this._setAccel(accel);
+        return;
+      }
+
       const conflictList = conflicts
-        .map((conflict) => `• ${formatConflict(conflict)}`)
+        .map((conflict) => `\u2022 ${formatConflict(conflict)}`)
         .join("\n");
 
-      presentAlert(
-        this,
-        "Shortcut Already in Use",
-        `${accel} is already assigned to:\n\n${conflictList}\n\n` +
-          "Leaving both in place makes the shortcut unreliable — which one " +
+      const alert = new Adw.AlertDialog({
+        heading: "Shortcut Already in Use",
+        body:
+          `${describeAccel(accel)} is already assigned to:\n\n${conflictList}\n\n` +
+          "Leaving both in place makes the shortcut unreliable \u2014 which one " +
           "responds can depend on what is focused. Replacing clears the " +
           "other assignments, and Superbar can restore them later.",
-        (alert) => {
-          alert.add_response("cancel", "Cancel");
-          alert.add_response("replace", "Replace");
-          alert.set_response_appearance(
-            "replace",
-            Adw.ResponseAppearance.DESTRUCTIVE,
-          );
-          alert.set_default_response("cancel");
-          alert.set_close_response("cancel");
-          alert.connect("response", (_alert, response) => {
-            if (response !== "replace") return;
+      });
 
-            this._replaceConflicts(accel, conflicts);
-          });
-        },
+      alert.add_response("cancel", "Cancel");
+      alert.add_response("replace", "Replace");
+      alert.set_response_appearance(
+        "replace",
+        Adw.ResponseAppearance.DESTRUCTIVE,
       );
+      alert.set_default_response("cancel");
+      alert.set_close_response("cancel");
+      alert.connect("response", (_alert, response) => {
+        if (response === "replace") this._replaceConflicts(accel, conflicts);
+      });
+
+      alert.present(this);
     }
 
     _replaceConflicts(accel, conflicts) {
-      const records = conflicts
-        .map((conflict) => clearConflictingBinding(conflict))
-        .filter((record) => record !== null);
-
-      const merged = mergeReplacedBindings(
-        decodeReplacedBindings(this._settings.get_string("replaced-keybindings")),
-        records,
-      );
-      this._settings.set_string(
-        "replaced-keybindings",
-        encodeReplacedBindings(merged),
-      );
+      replaceConflicts(this._settings, conflicts);
 
       this._setAccel(accel);
       this.onReplacedChanged?.();
@@ -596,9 +407,7 @@ const ReplacedShortcutsRow = GObject.registerClass(
     }
 
     sync() {
-      const records = decodeReplacedBindings(
-        this._settings.get_string("replaced-keybindings"),
-      );
+      const records = readReplacedBindings(this._settings);
 
       this.visible = records.length > 0;
       if (records.length === 0) return;
@@ -609,15 +418,7 @@ const ReplacedShortcutsRow = GObject.registerClass(
     }
 
     _restore() {
-      const records = decodeReplacedBindings(
-        this._settings.get_string("replaced-keybindings"),
-      );
-      const failed = records.filter((record) => !restoreReplacedBinding(record));
-
-      this._settings.set_string(
-        "replaced-keybindings",
-        encodeReplacedBindings(failed),
-      );
+      restoreReplacedBindings(this._settings);
       this.sync();
       this.onRestored?.();
     }
