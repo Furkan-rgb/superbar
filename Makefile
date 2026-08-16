@@ -17,7 +17,7 @@ SHELL_TYPELIB_DIR := $(firstword $(wildcard \
 	/usr/lib64/gnome-shell/girepository-1.0 \
 	/usr/lib/*/gnome-shell/girepository-1.0))
 
-.PHONY: help check syntax schema lint unit unit-gtk shexli pack verify test install enable \
+.PHONY: help check syntax schema lint unit unit-gtk smoke shexli pack verify test install enable \
 	disable prefs status nested renders renders-light renders-dark renders-list \
 	export release clean
 
@@ -27,6 +27,7 @@ help:
 		"make lint" "Run ESLint when it is installed" \
 		"make unit" "Run the appearance logic unit tests" \
 		"make unit-gtk" "Run the preferences tests that need GTK" \
+		"make smoke" "Drive the extension with real input in a headless Shell" \
 		"make shexli" "Run the extensions.gnome.org static analyzer" \
 		"make pack" "Build the extension ZIP in $(BUILD_DIR)/" \
 		"make test" "Run checks, build, and verify the ZIP archive" \
@@ -59,6 +60,8 @@ syntax:
 	@node --input-type=module --check < gnome-search-providers.js
 	@node --input-type=module --check < scripts/smoke-search-providers.js
 	@node --input-type=module --check < scripts/render-live.mjs
+	@node --input-type=module --check < scripts/headless-session.mjs
+	@node --input-type=module --check < scripts/smoke-input.mjs
 	@node --input-type=module --check < showcase/live-states.js
 	@node --input-type=module --check < showcase/render-driver@superbar.local/extension.js
 	@printf "JavaScript syntax is valid.\n"
@@ -84,6 +87,7 @@ lint:
 			extension.js prefs.js appearance.js app-search.js \
 			search-provider-config.js gnome-search-providers.js \
 			keybinding-conflicts.js keybinding-settings.js \
+			query-modes.js result-selection.js search-engines.js \
 			tests/*.test.js tests/prefs-gtk.js && \
 		printf "ESLint checks passed.\n"; \
 	else \
@@ -116,6 +120,17 @@ unit-gtk:
 		SUPERBAR_TEST_EXTENSION_DIR="$$tmp" \
 		GI_TYPELIB_PATH="$(SHELL_TYPELIB_DIR)$${GI_TYPELIB_PATH:+:$$GI_TYPELIB_PATH}" \
 		dbus-run-session -- gjs -m tests/prefs-gtk.js; \
+	fi
+
+# Keyboard, pointer and touch events pushed at the real extension in a headless
+# Shell. It needs GNOME Shell on the machine and a minute to run, so it reports
+# rather than gates and stays out of `make test`; run it before a release, and
+# after touching anything that handles input.
+smoke:
+	@if ! command -v gnome-shell >/dev/null 2>&1; then \
+		printf "GNOME Shell is missing; skipping the input smoke test.\n"; \
+	else \
+		node scripts/smoke-input.mjs; \
 	fi
 
 # The static analyser extensions.gnome.org recommends running before uploading.

@@ -125,6 +125,7 @@ shortcut, which usually means something else has already grabbed it.
 make help
 make test       # validate, build, and verify the ZIP
 make unit       # run all unit tests
+make smoke      # drive the extension with real input in a headless Shell
 make install    # install the latest local build
 make nested     # install and start a fresh nested GNOME Shell
 make renders    # rebuild the README images

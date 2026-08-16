@@ -8,6 +8,22 @@ Releases are cut by pushing a `v*` tag, which triggers the packaging workflow.
 
 ## [Unreleased]
 
+### Added
+
+- `make smoke` drives the installed extension with real keyboard, pointer and
+  touch events in a throwaway headless Shell and asserts what the bar did.
+  The touch dismissal bug fixed in 1.3.1 was invisible to both reading and the
+  unit tests — `button-press-event` looks like it handles clicks — so the
+  checks cover the input paths nothing else reaches. It needs GNOME Shell on
+  the machine and takes about a minute, so it reports rather than gates and
+  stays out of `make test`.
+
+### Changed
+
+- The headless-Shell setup the showcase renderer used moved to
+  `scripts/headless-session.mjs`, so the renderer and the smoke test share one
+  copy instead of growing two that drift.
+
 ## [1.3.1] - 2026-08-16
 
 ### Fixed
