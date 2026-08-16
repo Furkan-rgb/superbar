@@ -10,6 +10,18 @@ import GObject from "gi://GObject";
 import { ExtensionPreferences } from "resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js";
 import { SURFACE_COLOR_PRESETS } from "./appearance.js";
 import { SEARCH_ENGINES } from "./search-engines.js";
+import {
+  describeAccel,
+  describeAccelRejection,
+  formatConflict,
+  formatConflictSummary,
+} from "./keybinding-conflicts.js";
+import {
+  findConflictsFor,
+  readReplacedBindings,
+  replaceConflicts,
+  restoreReplacedBindings,
+} from "./keybinding-settings.js";
 
 function addRoundedRectangle(cr, x, y, width, height, radius) {
   cr.newSubPath();
@@ -114,6 +126,31 @@ function addSwitchSettingRow(group, settings, key, title, subtitle) {
   return row;
 }
 
+// ── Shortcut editing ────────────────────────────────────────────────────────
+
+const MODIFIER_KEYVALS = new Set(
+  [
+    Gdk.KEY_Shift_L,
+    Gdk.KEY_Shift_R,
+    Gdk.KEY_Control_L,
+    Gdk.KEY_Control_R,
+    Gdk.KEY_Alt_L,
+    Gdk.KEY_Alt_R,
+    Gdk.KEY_Super_L,
+    Gdk.KEY_Super_R,
+    Gdk.KEY_Meta_L,
+    Gdk.KEY_Meta_R,
+    Gdk.KEY_Hyper_L,
+    Gdk.KEY_Hyper_R,
+    Gdk.KEY_ISO_Level3_Shift,
+    Gdk.KEY_ISO_Level5_Shift,
+    Gdk.KEY_Caps_Lock,
+    Gdk.KEY_Shift_Lock,
+    Gdk.KEY_Num_Lock,
+    Gdk.KEY_Scroll_Lock,
+  ],
+);
+
 // ── Keybinding row ──────────────────────────────────────────────────────────
 
 const KeybindingRow = GObject.registerClass(
@@ -127,11 +164,19 @@ const KeybindingRow = GObject.registerClass(
       this._settings = settings;
       this._key = key;
 
+      this.onReplacedChanged = null;
+
+      this._conflictIcon = new Gtk.Image({
+        icon_name: "dialog-warning-symbolic",
+        valign: Gtk.Align.CENTER,
+        visible: false,
+      });
+
       this._shortcutLabel = new Gtk.ShortcutLabel({
         valign: Gtk.Align.CENTER,
         disabled_text: "Disabled",
       });
-      this._syncLabel();
+      this.syncState();
 
       const editBtn = new Gtk.Button({
         icon_name: "document-edit-symbolic",
@@ -149,17 +194,26 @@ const KeybindingRow = GObject.registerClass(
       });
       clearBtn.connect("clicked", () => {
         this._settings.set_strv(this._key, []);
-        this._syncLabel();
+        this.syncState();
       });
 
+      this.add_suffix(this._conflictIcon);
       this.add_suffix(this._shortcutLabel);
       this.add_suffix(editBtn);
       this.add_suffix(clearBtn);
     }
 
-    _syncLabel() {
+    syncState() {
       const shortcuts = this._settings.get_strv(this._key);
-      this._shortcutLabel.accelerator = shortcuts.length ? shortcuts[0] : "";
+      const accel = shortcuts.length ? shortcuts[0] : "";
+      this._shortcutLabel.accelerator = accel;
+
+      const conflicts = findConflictsFor(accel);
+      this._conflictIcon.visible = conflicts.length > 0;
+      this._conflictIcon.tooltip_text = conflicts.length
+        ? `${formatConflictSummary(conflicts)}. The shortcut may open ` +
+          `something else, or nothing at all, depending on what has focus.`
+        : "";
     }
 
     _startCapture() {
@@ -182,7 +236,10 @@ const KeybindingRow = GObject.registerClass(
       });
 
       const headerBar = new Adw.HeaderBar({ show_end_title_buttons: false });
-      const cancelBtn = new Gtk.Button({ label: "Cancel" });
+      // Every keystroke here is a shortcut candidate, so nothing in the dialog
+      // may take focus: a focused button turns Space and Enter into a click
+      // instead of a capture.
+      const cancelBtn = new Gtk.Button({ label: "Cancel", focusable: false });
       cancelBtn.connect("clicked", () => dialog.destroy());
       headerBar.pack_start(cancelBtn);
 
@@ -205,29 +262,33 @@ const KeybindingRow = GObject.registerClass(
       content.append(box);
       dialog.set_content(content);
 
+      // The compositor owns combinations like Alt+Space, and would act on them
+      // instead of delivering them here — which would make exactly the
+      // shortcuts this dialog needs to detect impossible to press. Inhibiting
+      // lasts only while the dialog is up.
+      let inhibitedSurface = null;
+      dialog.connect("map", () => {
+        inhibitedSurface = dialog.get_surface();
+        inhibitedSurface?.inhibit_system_shortcuts(null);
+        this._inhibitedSurface = inhibitedSurface;
+      });
+      dialog.connect("unmap", () => {
+        inhibitedSurface?.restore_system_shortcuts();
+        inhibitedSurface = null;
+        this._inhibitedSurface = null;
+      });
+
       const controller = new Gtk.EventControllerKey();
+      // Capture phase, so the dialog sees the key before any focused widget
+      // gets a chance to consume it.
+      controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
       controller.connect("key-pressed", (_ctrl, keyval, keycode, state) => {
         if (keyval === Gdk.KEY_Escape) {
           dialog.destroy();
           return Gdk.EVENT_STOP;
         }
 
-        // Ignore bare modifiers
-        if (
-          [
-            Gdk.KEY_Shift_L,
-            Gdk.KEY_Shift_R,
-            Gdk.KEY_Control_L,
-            Gdk.KEY_Control_R,
-            Gdk.KEY_Alt_L,
-            Gdk.KEY_Alt_R,
-            Gdk.KEY_Super_L,
-            Gdk.KEY_Super_R,
-            Gdk.KEY_Meta_L,
-            Gdk.KEY_Meta_R,
-          ].includes(keyval)
-        )
-          return Gdk.EVENT_PROPAGATE;
+        if (MODIFIER_KEYVALS.has(keyval)) return Gdk.EVENT_PROPAGATE;
 
         const mask =
           state &
@@ -242,17 +303,124 @@ const KeybindingRow = GObject.registerClass(
           keycode,
           mask,
         );
-        if (accel && accel !== "") {
-          this._settings.set_strv(this._key, [accel]);
-          this._syncLabel();
+
+        const rejection = describeAccelRejection({
+          valid: Boolean(accel) && Gtk.accelerator_valid(keyval, mask),
+          hasModifier: mask !== 0,
+          functionKey: keyval >= Gdk.KEY_F1 && keyval <= Gdk.KEY_F35,
+        });
+
+        // Keep the dialog up so the rejected combination can be corrected
+        // without reopening it.
+        if (rejection) {
+          hint.label = rejection;
+          hint.add_css_class("error");
+          return Gdk.EVENT_STOP;
         }
 
         dialog.destroy();
+        this._applyAccel(accel);
         return Gdk.EVENT_STOP;
       });
 
       dialog.add_controller(controller);
       dialog.present();
+    }
+
+    _setAccel(accel) {
+      this._settings.set_strv(this._key, [accel]);
+      this.syncState();
+    }
+
+    // Conflicting shortcuts are only ever cleared through this prompt. Doing it
+    // silently would rewrite the user's configuration behind their back, and it
+    // would still miss the conflicts we cannot see: shortcuts owned by other
+    // extensions, and applications that grab keys for themselves.
+    _applyAccel(accel) {
+      const conflicts = findConflictsFor(accel);
+      if (conflicts.length === 0) {
+        this._setAccel(accel);
+        return;
+      }
+
+      const conflictList = conflicts
+        .map((conflict) => `\u2022 ${formatConflict(conflict)}`)
+        .join("\n");
+
+      const alert = new Adw.AlertDialog({
+        heading: "Shortcut Already in Use",
+        body:
+          `${describeAccel(accel)} is already assigned to:\n\n${conflictList}\n\n` +
+          "Leaving both in place makes the shortcut unreliable \u2014 which one " +
+          "responds can depend on what is focused. Replacing clears the " +
+          "other assignments, and Superbar can restore them later.",
+      });
+
+      alert.add_response("cancel", "Cancel");
+      alert.add_response("replace", "Replace");
+      alert.set_response_appearance(
+        "replace",
+        Adw.ResponseAppearance.DESTRUCTIVE,
+      );
+      alert.set_default_response("cancel");
+      alert.set_close_response("cancel");
+      alert.connect("response", (_alert, response) => {
+        if (response === "replace") this._replaceConflicts(accel, conflicts);
+      });
+
+      alert.present(this);
+    }
+
+    _replaceConflicts(accel, conflicts) {
+      replaceConflicts(this._settings, conflicts);
+
+      this._setAccel(accel);
+      this.onReplacedChanged?.();
+    }
+  },
+);
+
+// ── Replaced shortcuts row ──────────────────────────────────────────────────
+
+const ReplacedShortcutsRow = GObject.registerClass(
+  {
+    GTypeName: "SuperbarReplacedShortcutsRow",
+  },
+  class ReplacedShortcutsRow extends Adw.ActionRow {
+    _init(settings, params = {}) {
+      super._init({
+        title: "Replaced System Shortcuts",
+        ...params,
+      });
+
+      this._settings = settings;
+      this.onRestored = null;
+
+      const restoreBtn = new Gtk.Button({
+        label: "Restore",
+        valign: Gtk.Align.CENTER,
+      });
+      restoreBtn.connect("clicked", () => this._restore());
+      this.add_suffix(restoreBtn);
+
+      this.sync();
+    }
+
+    sync() {
+      const records = readReplacedBindings(this._settings);
+
+      this.visible = records.length > 0;
+      if (records.length === 0) return;
+
+      this.subtitle = `Cleared to free the Superbar shortcut: ${records
+        .map((record) => formatConflict(record))
+        .join(", ")}`;
+    }
+
+    _restore() {
+      restoreReplacedBindings(this._settings);
+      this.sync();
+      this.onRestored?.();
     }
   },
 );
@@ -288,6 +456,11 @@ export default class SuperbarPreferences extends ExtensionPreferences {
       subtitle: "Click the edit button and press your desired key combination",
     });
     shortcutGroup.add(row);
+
+    const replacedRow = new ReplacedShortcutsRow(settings);
+    shortcutGroup.add(replacedRow);
+    row.onReplacedChanged = () => replacedRow.sync();
+    replacedRow.onRestored = () => row.syncState();
 
     // ── Search group ────────────────────────────────────────────────────────
     const searchGroup = new Adw.PreferencesGroup({

@@ -1,0 +1,7 @@
+{
+  "name": "Superbar Render Driver",
+  "description": "Development-only helper that puts Superbar into a fixed state and captures the stage. It is installed into a throwaway session by scripts/render-live.mjs and is never part of a release build.",
+  "uuid": "render-driver@superbar.local",
+  "shell-version": ["49", "50"],
+  "version": 1
+}
