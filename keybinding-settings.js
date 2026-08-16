@@ -87,7 +87,12 @@ export function collectSystemKeybindings() {
       // is unrelated configuration.
       if (value.get_type_string() !== "as") continue;
 
-      const accels = value.get_strv().filter((accel) => accel);
+      // Empty entries are not accelerators and must not be matched against,
+      // but they are part of the value: gsd ships keys like
+      // help = ['', '<Super>F1'], and restoring without the '' would not put
+      // back what was actually there.
+      const values = value.get_strv();
+      const accels = values.filter((accel) => accel);
       if (accels.length === 0) continue;
 
       // key came from this same schema's list_keys(), so the lookup holds.
@@ -100,7 +105,7 @@ export function collectSystemKeybindings() {
         summary,
         type: "as",
         accels,
-        values: accels,
+        values,
       });
     }
   }

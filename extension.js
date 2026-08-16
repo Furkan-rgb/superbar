@@ -349,7 +349,24 @@ function ensureActorVisibleInScrollView(scrollView, actor) {
 }
 
 export default class SearchBar extends Extension {
+  // The Shell marks an extension whose enable() throws as ERROR and never
+  // calls disable() for it, so anything already registered — the keybinding
+  // above all — would stay registered against a dead extension until the
+  // session restarts. Undo it here, then let the Shell report the failure.
   enable() {
+    try {
+      this._enable();
+    } catch (error) {
+      try {
+        this.disable();
+      } catch (cleanupError) {
+        console.error(`Superbar: cleanup after a failed enable also failed: ${cleanupError}`);
+      }
+      throw error;
+    }
+  }
+
+  _enable() {
     this._enabled = true;
     this._searchGeneration = 0;
     this._pendingActivation = null;

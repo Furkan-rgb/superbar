@@ -17,7 +17,7 @@ SHELL_TYPELIB_DIR := $(firstword $(wildcard \
 	/usr/lib64/gnome-shell/girepository-1.0 \
 	/usr/lib/*/gnome-shell/girepository-1.0))
 
-.PHONY: help check syntax schema lint unit unit-gtk pack verify test install enable \
+.PHONY: help check syntax schema lint unit unit-gtk shexli pack verify test install enable \
 	disable prefs status nested renders renders-light renders-dark renders-list \
 	export release clean
 
@@ -27,6 +27,7 @@ help:
 		"make lint" "Run ESLint when it is installed" \
 		"make unit" "Run the appearance logic unit tests" \
 		"make unit-gtk" "Run the preferences tests that need GTK" \
+		"make shexli" "Run the extensions.gnome.org static analyzer" \
 		"make pack" "Build the extension ZIP in $(BUILD_DIR)/" \
 		"make test" "Run checks, build, and verify the ZIP archive" \
 		"make install" "Install the latest local build" \
@@ -113,6 +114,18 @@ unit-gtk:
 		SUPERBAR_TEST_EXTENSION_DIR="$$tmp" \
 		GI_TYPELIB_PATH="$(SHELL_TYPELIB_DIR)$${GI_TYPELIB_PATH:+:$$GI_TYPELIB_PATH}" \
 		dbus-run-session -- gjs -m tests/prefs-gtk.js; \
+	fi
+
+# The static analyser extensions.gnome.org recommends running before uploading
+# (pip install -U shexli). Deliberately not part of `make test`: shexli 0.2.1
+# segfaults on this extension's two largest files, inside its own
+# lifecycle/collect.py -> evidence.py node handling, so it cannot gate a build
+# yet. It runs clean on the smaller modules.
+shexli: pack
+	@if command -v shexli >/dev/null 2>&1; then \
+		shexli "$(BUILD_ARCHIVE)"; \
+	else \
+		printf "shexli is not installed; skipping. Install it with: pip install -U shexli\n"; \
 	fi
 
 pack: check

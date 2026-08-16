@@ -316,6 +316,59 @@ check(
   keybindingRow._conflictIcon.visible === true,
 );
 
+// ── A cleared shortcut comes back exactly as it was ─────────────────────────
+
+// GNOME ships keys whose list contains an empty entry, e.g. gsd's
+// help = ['', '<Super>F1']. The empty entry is not an accelerator and must not
+// be matched, but it is part of the value: restoring without it would quietly
+// rewrite a setting Superbar only borrowed.
+{
+  const media = new Gio.Settings({
+    schema_id: "org.gnome.settings-daemon.plugins.media-keys",
+  });
+  const original = ["", "<Super>F1"];
+  media.set_strv("help", original);
+  Gio.Settings.sync();
+
+  setShortcut("<Super>F1");
+  check(
+    "a shortcut sharing a key with an empty entry is still detected",
+    keybindingRow._conflictIcon.visible === true,
+  );
+
+  // Deliberately taken from the real scan rather than hand-built: the value
+  // being preserved is assembled by collectSystemKeybindings, so a hand-made
+  // binding would test nothing.
+  const { findConflictsFor } = await import(
+    `file://${SOURCE_DIR}/keybinding-settings.js`
+  );
+  const scanned = findConflictsFor("<Super>F1").filter(
+    (conflict) => conflict.key === "help",
+  );
+  check(
+    "the scan reports the untouched entries alongside the accelerator",
+    scanned.length === 1 &&
+      JSON.stringify(scanned[0].values) === JSON.stringify(original),
+    `scan gave ${JSON.stringify(scanned[0]?.values)}`,
+  );
+
+  keybindingRow._replaceConflicts("<Super>F1", scanned);
+  Gio.Settings.sync();
+  check(
+    "clearing removes only the accelerator, not the rest of the value",
+    JSON.stringify(media.get_strv("help")) === JSON.stringify([""]),
+    `value is ${JSON.stringify(media.get_strv("help"))}`,
+  );
+
+  replacedRow._restore();
+  Gio.Settings.sync();
+  check(
+    "restoring puts the value back exactly, empty entry included",
+    JSON.stringify(media.get_strv("help")) === JSON.stringify(original),
+    `value is ${JSON.stringify(media.get_strv("help"))}`,
+  );
+}
+
 // ── Custom shortcuts, which live in a relocatable schema ────────────────────
 
 const CUSTOM_PATH =
