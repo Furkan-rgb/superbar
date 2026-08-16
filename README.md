@@ -77,6 +77,36 @@ Log out and back in if this is the first time installing.
 - LocalSearch (`localsearch`) or Tracker 3 (`tracker3`) for indexed file
   results; common-folder results remain available without either command
 
+## Keyboard shortcut
+
+Superbar opens with **Alt+Space**. Change it from the General page in
+preferences: click the edit button and press the combination you want.
+
+Alt+Space is also GNOME's default for *Activate the window menu*, and two
+shortcuts sharing one combination behave unpredictably — which one responds can
+depend on what is focused. Preferences detects this. When the combination you
+press is already assigned to a GNOME shortcut, Superbar names the conflict and
+offers to replace it; a warning icon appears next to a shortcut that is
+currently in conflict. Nothing is cleared unless you choose *Replace*, and
+anything that was cleared can be put back with *Restore* in the same group.
+
+Conflict detection reads the shortcut schemas used by GNOME Shell, Mutter, the
+window manager, and system media keys, including custom shortcuts. It cannot
+see shortcuts owned by other extensions or keys grabbed directly by an
+application, so a clean result is not a guarantee that a combination is free.
+
+If the shortcut does nothing, check that no other launcher is running and still
+holding the combination, then look for a message from Superbar:
+
+```bash
+journalctl --user -b _COMM=gnome-shell | grep -i superbar
+```
+
+Superbar logs a warning and shows a notification when the system refuses its
+shortcut, which usually means something else has already grabbed it.
+
+---
+
 ## Makefile commands
 
 ```bash

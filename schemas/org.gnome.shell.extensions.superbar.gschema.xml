@@ -10,6 +10,11 @@ Copyright (C) 2026 Furkan
       <summary>Toggle Superbar</summary>
       <description>Shortcut to open and close Superbar.</description>
     </key>
+    <key name="replaced-keybindings" type="s">
+      <default>''</default>
+      <summary>Replaced System Shortcuts</summary>
+      <description>Serialized record of the GNOME shortcuts that were cleared to free the Superbar shortcut, kept so they can be restored.</description>
+    </key>
     <key name="clipboard-monitor-enabled" type="b">
       <default>true</default>
       <summary>Enable Clipboard Monitoring</summary>

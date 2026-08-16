@@ -41,6 +41,7 @@ syntax:
 	@node --input-type=module --check < appearance.js
 	@node --input-type=module --check < app-search.js
 	@node --input-type=module --check < search-provider-config.js
+	@node --input-type=module --check < keybinding-conflicts.js
 	@node --input-type=module --check < gnome-search-providers.js
 	@node --input-type=module --check < scripts/smoke-search-providers.js
 	@printf "JavaScript syntax is valid.\n"
@@ -62,7 +63,8 @@ lint:
 			--rule 'no-dupe-keys:error' \
 			--rule 'no-unreachable:error' \
 			extension.js prefs.js appearance.js app-search.js \
-			search-provider-config.js gnome-search-providers.js tests/*.test.js; \
+			search-provider-config.js gnome-search-providers.js \
+			keybinding-conflicts.js tests/*.test.js; \
 		printf "ESLint checks passed.\n"; \
 	else \
 		printf "ESLint is not installed; skipping optional lint checks.\n"; \
@@ -78,7 +80,8 @@ pack: check
 		--extra-source=app-search.js \
 		--extra-source=search-provider-config.js \
 		--extra-source=gnome-search-providers.js \
-		--extra-source=search-engines.js --extra-source=result-selection.js .
+		--extra-source=search-engines.js --extra-source=result-selection.js \
+		--extra-source=keybinding-conflicts.js .
 	@printf "Built %s\n" "$(BUILD_ARCHIVE)"
 
 verify: pack

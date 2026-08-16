@@ -341,6 +341,14 @@ export default class SearchBar extends Extension {
     this._resumableSession = null;
     this._activeMonitorIndex = null;
     this._settings = this.getSettings();
+
+    // Grab the shortcut before building anything else. Setup below talks to
+    // D-Bus, the clipboard, and search providers; if any of that throws, the
+    // extension still answers the hotkey instead of looking enabled while
+    // silently having no way to open.
+    this._keybindingAdded = false;
+    this._ensureKeybinding();
+
     this._shellSettings = St.Settings.get();
     this._themeContext = St.ThemeContext.get_for_stage(global.stage);
     try {
@@ -730,6 +738,8 @@ export default class SearchBar extends Extension {
     this._updateTheme();
 
     this._settings.connectObject(
+      "changed::toggle-shortcut",
+      () => this._ensureKeybinding(),
       "changed::bar-width",
       () => {
         this._repositionContainer();
@@ -772,20 +782,52 @@ export default class SearchBar extends Extension {
       );
     });
 
-    Main.wm.addKeybinding(
+    this._startClipboardMonitoring();
+  }
+
+  // Mutter keeps the grab in sync with the GSettings key on its own, so this
+  // only ever has to register once. It is called again when the shortcut
+  // changes so that a combination rejected at startup can still take effect
+  // once the user picks a different one.
+  _ensureKeybinding() {
+    if (this._keybindingAdded) return;
+
+    const accels = this._settings.get_strv("toggle-shortcut");
+    const action = Main.wm.addKeybinding(
       "toggle-shortcut",
       this._settings,
       Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
-      Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
+      Shell.ActionMode.NORMAL |
+        Shell.ActionMode.OVERVIEW |
+        Shell.ActionMode.POPUP,
       this._toggleSearch.bind(this),
     );
 
-    this._startClipboardMonitoring();
+    if (action !== Meta.KeyBindingAction.NONE) {
+      this._keybindingAdded = true;
+      return;
+    }
+
+    // An empty list means the user deliberately disabled the shortcut.
+    if (accels.length === 0) return;
+
+    const accel = accels[0];
+    console.warn(
+      `Superbar: failed to bind the shortcut ${accel}; another shortcut or ` +
+        `application is likely already using it`,
+    );
+    Main.notify(
+      "Superbar could not register its shortcut",
+      `${accel} is already in use. Choose a different shortcut in Superbar preferences.`,
+    );
   }
 
   disable() {
     this._enabled = false;
-    Main.wm.removeKeybinding("toggle-shortcut");
+    if (this._keybindingAdded) {
+      Main.wm.removeKeybinding("toggle-shortcut");
+      this._keybindingAdded = false;
+    }
     this._removeSource("_clipboardPollId");
     this._cancelPendingSearch();
     this._removeSource("_selectionScrollTimeoutId");
@@ -1127,6 +1169,10 @@ export default class SearchBar extends Extension {
   }
 
   _toggleSearch() {
+    // The shortcut is registered before the UI is built, so a failure part way
+    // through enable() can leave the handler live with nothing to show.
+    if (!this._enabled || !this._container || !this._entry) return;
+
     if (this._searchOpen) {
       this._closeSearch();
     } else {
@@ -1139,6 +1185,26 @@ export default class SearchBar extends Extension {
 
     this._activeMonitorIndex = this._getTargetMonitorIndex();
     this._searchOpen = true;
+
+    try {
+      this._presentSearch();
+    } catch (error) {
+      // Without this the flag stays true while nothing is on screen, and the
+      // shortcut reads as dead until it has been pressed a second time to
+      // toggle the state back.
+      console.error(`Superbar: failed to open the search bar: ${error}`);
+      this._abandonOpenSearch();
+    }
+  }
+
+  _abandonOpenSearch() {
+    this._searchOpen = false;
+    this._destroyClickShield();
+    this._container?.remove_all_transitions();
+    this._container?.hide();
+  }
+
+  _presentSearch() {
     const resumableSession = this._takeResumableSession();
     const resumed = resumableSession !== null;
     const currentQuery = this._classifyQuery(
