@@ -675,7 +675,14 @@ export default class SuperbarPreferences extends ExtensionPreferences {
         "search-bar-clipboard-history.json",
       ]);
       try {
-        GLib.file_set_contents(historyPath, "[]");
+        Gio.File.new_for_path(historyPath).replace_contents(
+          new TextEncoder().encode("[]"),
+          null,
+          false,
+          Gio.FileCreateFlags.PRIVATE |
+            Gio.FileCreateFlags.REPLACE_DESTINATION,
+          null,
+        );
         GLib.chmod(historyPath, 0o600);
       } catch (_e) {
         // Clearing history is best-effort.

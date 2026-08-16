@@ -8,6 +8,53 @@ Releases are cut by pushing a `v*` tag, which triggers the packaging workflow.
 
 ## [Unreleased]
 
+### Security
+
+- The clipboard history file is created with `0600` permissions instead of
+  being written with the default umask and tightened immediately afterwards.
+  Between those two steps the file — which holds everything the user has
+  copied, passwords included — was readable by any local process. Because
+  replacing a file preserves its existing mode, history files written by
+  earlier versions are also tightened explicitly on load.
+
+### Changed
+
+- Clipboard history reaches disk through an asynchronous, coalesced write
+  rather than a synchronous one on every capture, so the compositor thread no
+  longer blocks on file I/O while the user is typing. Serializing the history
+  still happens on that thread; only the write itself moved off it.
+- Saving the adaptive ranking history no longer triggers a reload and a full
+  re-run of the active search. The extension writes that key itself, and was
+  reacting to its own write; only external changes are picked up now.
+- Deferred scroll and results-height updates run on Mutter's `IDLE` laters
+  instead of zero-delay `PRIORITY_DEFAULT` timeouts. Both of those read
+  allocations after queueing a relayout, and a priority-0 timeout preempts the
+  frame clock, so they observed the previous frame's geometry — the selected
+  row could scroll to a stale position on a long result list. `IDLE` laters run
+  below the frame clock's priority, so the relayout lands first.
+- Remote lookups (weather, dictionary, currency) are cached for five minutes,
+  so a repeated query no longer re-hits the third-party API. Error responses
+  are not cached.
+- The HTTP session has a 10 second socket timeout, so a silent endpoint no
+  longer leaves the spinner running indefinitely. This is an inactivity budget,
+  not a deadline for the whole request.
+
+### Fixed
+
+- Clipboard captures that arrived before the history file finished loading
+  could overwrite the saved history with a single entry and then be discarded
+  themselves. They are now held until the load completes.
+- Clearing the clipboard history while its file was still loading could restore
+  every cleared entry, in memory and on disk.
+- A history load left in flight across a screen lock could land after the
+  unlock and discard entries copied since.
+
+### Known issues
+
+- Coalescing means up to 400 ms of copies can be lost if GNOME Shell exits
+  without running `disable()` — a crash, or `Alt+F2 r`. A clean logout or
+  screen lock flushes pending writes synchronously.
+
 ## [1.2.1] - 2026-08-16
 
 ### Changed

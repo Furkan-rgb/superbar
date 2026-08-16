@@ -45,6 +45,23 @@ const CONFLICT_PROMPT_MAX_ATTEMPTS = 30;
 const TOGGLE_KEYBINDING_NAME = "toggle-shortcut";
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
+// Clipboard writes are coalesced: a burst of copies produces one disk write
+// instead of one per entry.
+const CLIPBOARD_SAVE_DEBOUNCE_MS = 400;
+// Remote lookups are read-only and cheap to repeat, so a short cache spares the
+// third-party APIs when a query is retyped.
+const REMOTE_CACHE_TTL_MS = 5 * 60 * 1000;
+const REMOTE_CACHE_MAX_ENTRIES = 32;
+// libsoup forwards this to g_socket_set_timeout, so it is an inactivity budget
+// per I/O operation rather than a deadline for the whole request. A server that
+// keeps dribbling bytes is not covered.
+const NETWORK_IDLE_TIMEOUT_SECONDS = 10;
+// g_file_replace_contents copies an existing file's mode onto the temp file it
+// renames into place, which would defeat PRIVATE on every write after the
+// first. REPLACE_DESTINATION suppresses that copy (and refuses to follow a
+// symlink), so the history file ends up 0600 whether or not it already existed.
+const CLIPBOARD_FILE_FLAGS =
+  Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION;
 const RESULTS_REVEAL_ANIMATION_MS = 85;
 const RESULTS_COLLAPSE_ANIMATION_MS = 45;
 const RESULTS_MIN_HEIGHT = 120;
@@ -392,12 +409,21 @@ export default class SearchBar extends Extension {
       this._interfaceSettings = null;
     }
     this._rankingHistory = new Map();
+    this._lastRankingHistoryWrite = null;
     this._loadRankingHistory();
-    this._session = new Soup.Session();
+    this._session = new Soup.Session({ timeout: NETWORK_IDLE_TIMEOUT_SECONDS });
+    this._remoteCache = new Map();
     this._clipboard = St.Clipboard.get_default();
     this._clipboardSelection = null;
     this._clipboardHistory = [];
     this._clipboardSearchHistory = null;
+    this._clipboardHistoryLoaded = false;
+    this._pendingClipboardEntries = [];
+    this._clipboardHistoryDirty = false;
+    this._clipboardSaveInFlight = false;
+    this._clipboardSaveId = null;
+    this._clipboardSaveCancellable = null;
+    this._clipboardLoadCancellable = null;
     this._loadClipboardHistory();
 
     try {
@@ -803,6 +829,17 @@ export default class SearchBar extends Extension {
       () => this._refreshCurrentSearch(),
       "changed::ranking-history",
       () => {
+        // This key is written by the extension itself on every activation. Only
+        // an external write (prefs clearing the history) needs to be picked up;
+        // reacting to our own would reparse what we just serialized and re-run
+        // the whole search, which is visible when the panel stays open after a
+        // clipboard copy.
+        if (
+          this._settings.get_string("ranking-history") ===
+          this._lastRankingHistoryWrite
+        ) {
+          return;
+        }
         this._loadRankingHistory();
         this._refreshCurrentSearch();
       },
@@ -1033,8 +1070,11 @@ export default class SearchBar extends Extension {
     this._conflictDialog = null;
     this._removeSource("_conflictPromptId");
     this._cancelPendingSearch();
-    this._removeSource("_selectionScrollTimeoutId");
-    this._removeSource("_resultsHeightTimeoutId");
+    this._removeLater("_selectionScrollLaterId");
+    this._removeLater("_resultsHeightLaterId");
+    this._clipboardLoadCancellable?.cancel();
+    this._clipboardLoadCancellable = null;
+    this._flushClipboardHistoryNow();
 
     this._settings?.disconnectObject(this);
     this._clipboardSelection?.disconnectObject(this);
@@ -1112,8 +1152,15 @@ export default class SearchBar extends Extension {
     this._clipboardSelection = null;
     this._clipboardHistory = null;
     this._clipboardSearchHistory = null;
+    this._pendingClipboardEntries = null;
+    this._clipboardHistoryLoaded = false;
+    this._clipboardSaveCancellable = null;
+    this._clipboardLoadCancellable = null;
+    this._remoteCache?.clear();
+    this._remoteCache = null;
     this._rankingHistory?.clear();
     this._rankingHistory = null;
+    this._lastRankingHistoryWrite = null;
     this._results = null;
     this._resultRows = null;
     this._resultMetadataActors = null;
@@ -1133,6 +1180,16 @@ export default class SearchBar extends Extension {
     if (!sourceId) return;
 
     GLib.Source.remove(sourceId);
+    this[propertyName] = null;
+  }
+
+  // Laters live on the compositor rather than the main loop, so they are
+  // cancelled through MetaLaters instead of GLib.Source.
+  _removeLater(propertyName) {
+    const laterId = this[propertyName];
+    if (!laterId) return;
+
+    global.compositor.get_laters().remove(laterId);
     this[propertyName] = null;
   }
 
@@ -1197,6 +1254,7 @@ export default class SearchBar extends Extension {
 
     const serialized = JSON.stringify(entries);
     if (serialized !== this._settings.get_string("ranking-history")) {
+      this._lastRankingHistoryWrite = serialized;
       this._settings.set_string("ranking-history", serialized);
     }
   }
@@ -1507,7 +1565,7 @@ export default class SearchBar extends Extension {
   }
 
   _resetSearch() {
-    this._removeSource("_selectionScrollTimeoutId");
+    this._removeLater("_selectionScrollLaterId");
     this._copiedClipboardValue = null;
     this._clipboardSearchHistory = null;
 
@@ -1923,30 +1981,142 @@ export default class SearchBar extends Extension {
   }
 
   _loadClipboardHistory() {
-    const file = Gio.File.new_for_path(this._getClipboardHistoryPath());
-    file.load_contents_async(null, (_file, res) => {
+    const historyPath = this._getClipboardHistoryPath();
+    const file = Gio.File.new_for_path(historyPath);
+    // disable() and enable() run on every screen lock, so without a cancellable
+    // a load started before the lock can land after the unlock and overwrite
+    // the state the new cycle has already built up.
+    const cancellable = new Gio.Cancellable();
+    this._clipboardLoadCancellable = cancellable;
+
+    file.load_contents_async(cancellable, (_file, res) => {
+      if (this._clipboardLoadCancellable === cancellable) {
+        this._clipboardLoadCancellable = null;
+      }
+      if (!this._enabled || cancellable.is_cancelled()) return;
+
       try {
         const [success, contents] = file.load_contents_finish(res);
-        if (!this._enabled || !success) return;
+        if (!success) return;
+
         const data = JSON.parse(new TextDecoder().decode(contents));
-        if (!Array.isArray(data)) return;
-        this._clipboardHistory = data
-          .filter((entry) => typeof entry?.text === "string")
-          .slice(0, this._settings.get_int("clipboard-history-limit"));
+        // A clear that happened while this load was in flight already
+        // established the authoritative state; restoring the file we read
+        // before it would resurrect the entries the user just deleted.
+        if (Array.isArray(data) && !this._clipboardHistoryLoaded) {
+          this._clipboardHistory = data
+            .filter((entry) => typeof entry?.text === "string")
+            .slice(0, this._settings.get_int("clipboard-history-limit"));
+        }
       } catch (_e) {
         // history file missing or corrupt; start fresh
+      } finally {
+        // g_file_replace_contents preserves an existing file's mode, so PRIVATE
+        // alone never retightens a history file written by an older version.
+        // This has to run whether or not the contents parsed.
+        GLib.chmod(historyPath, 0o600);
+        this._flushPendingClipboardEntries();
       }
     });
   }
 
+  // Captures that arrive before the history file has finished loading are held
+  // back: storing them immediately would append to a still-empty list and
+  // overwrite the saved history on disk, and the load would then discard the
+  // captured entry.
+  _flushPendingClipboardEntries() {
+    if (this._clipboardHistoryLoaded) return;
+    this._clipboardHistoryLoaded = true;
+
+    const pending = this._pendingClipboardEntries ?? [];
+    this._pendingClipboardEntries = [];
+    pending.forEach((text) => this._storeClipboardEntry(text));
+  }
+
   _saveClipboardHistory() {
+    this._clipboardHistoryDirty = true;
+    if (this._clipboardSaveId) return;
+
+    this._clipboardSaveId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT_IDLE,
+      CLIPBOARD_SAVE_DEBOUNCE_MS,
+      () => {
+        this._clipboardSaveId = null;
+        this._writeClipboardHistory();
+        return GLib.SOURCE_REMOVE;
+      },
+    );
+  }
+
+  _writeClipboardHistory() {
+    // A second write while one is in flight would race it, so leave the dirty
+    // flag set and let the in-flight completion pick the newer state up.
+    if (!this._clipboardHistoryDirty || this._clipboardSaveInFlight) return;
+
+    this._clipboardHistoryDirty = false;
+    this._clipboardSaveInFlight = true;
+
+    const cancellable = new Gio.Cancellable();
+    this._clipboardSaveCancellable = cancellable;
+
+    const file = Gio.File.new_for_path(this._getClipboardHistoryPath());
+    file.replace_contents_bytes_async(
+      new GLib.Bytes(this._encodeClipboardHistory()),
+      null,
+      false,
+      CLIPBOARD_FILE_FLAGS,
+      cancellable,
+      (_file, res) => {
+        // A callback from a superseded write must not clear the latch belonging
+        // to the write that replaced it.
+        if (this._clipboardSaveCancellable !== cancellable) return;
+
+        this._clipboardSaveCancellable = null;
+        this._clipboardSaveInFlight = false;
+        try {
+          file.replace_contents_finish(res);
+        } catch (_e) {
+          // save errors are non-fatal; silently ignore
+        }
+        if (this._enabled && this._clipboardHistoryDirty) {
+          this._writeClipboardHistory();
+        }
+      },
+    );
+  }
+
+  _encodeClipboardHistory() {
+    return new TextEncoder().encode(
+      JSON.stringify(this._clipboardHistory ?? []),
+    );
+  }
+
+  // disable() cannot wait on an async write, so a still-pending save is flushed
+  // synchronously. Same creation flags, so the permissions stay correct.
+  _flushClipboardHistoryNow() {
+    this._removeSource("_clipboardSaveId");
+
+    if (this._clipboardSaveInFlight) {
+      // An in-flight write cannot be waited on, and letting it land after the
+      // synchronous one below would put stale content back on disk. The write
+      // below carries the current history, so cancelling loses nothing.
+      this._clipboardSaveCancellable?.cancel();
+      this._clipboardSaveCancellable = null;
+      this._clipboardSaveInFlight = false;
+      this._clipboardHistoryDirty = true;
+    }
+
+    if (!this._clipboardHistoryDirty) return;
+
+    this._clipboardHistoryDirty = false;
     try {
-      const historyPath = this._getClipboardHistoryPath();
-      GLib.file_set_contents(
-        historyPath,
-        JSON.stringify(this._clipboardHistory),
+      Gio.File.new_for_path(this._getClipboardHistoryPath()).replace_contents(
+        this._encodeClipboardHistory(),
+        null,
+        false,
+        CLIPBOARD_FILE_FLAGS,
+        null,
       );
-      GLib.chmod(historyPath, 0o600);
     } catch (_e) {
       // save errors are non-fatal; silently ignore
     }
@@ -1955,6 +2125,10 @@ export default class SearchBar extends Extension {
   _clearClipboardHistory() {
     this._clipboardHistory = [];
     this._clipboardSearchHistory = null;
+    this._pendingClipboardEntries = [];
+    // An empty history is authoritative, so a load still in flight must not
+    // write the pre-clear contents back over it.
+    this._clipboardHistoryLoaded = true;
     this._saveClipboardHistory();
 
     if (
@@ -2003,6 +2177,11 @@ export default class SearchBar extends Extension {
 
     const normalized = text.trim();
     if (!normalized) return;
+
+    if (!this._clipboardHistoryLoaded) {
+      this._pendingClipboardEntries.push(text);
+      return;
+    }
 
     if (this._clipboardHistory[0]?.text === text) return;
 
@@ -2853,12 +3032,32 @@ export default class SearchBar extends Extension {
   // --- Web Fetches ---
 
   async _fetchJson(url, cancellable) {
+    const cached = this._remoteCache?.get(url);
+    if (cached && cached.expiry > Date.now()) return cached.data;
+
+    const message = Soup.Message.new("GET", url);
     const bytes = await this._session.send_and_read_async(
-      Soup.Message.new("GET", url),
+      message,
       GLib.PRIORITY_DEFAULT,
       cancellable,
     );
-    return JSON.parse(new TextDecoder().decode(bytes.get_data()));
+    const data = JSON.parse(new TextDecoder().decode(bytes.get_data()));
+
+    // These APIs return a JSON body on failures too. Caching one would pin the
+    // error in place for the whole TTL, with no way for the user to retry.
+    if (this._remoteCache && message.get_status() === Soup.Status.OK) {
+      // Insertion order doubles as the eviction order.
+      this._remoteCache.delete(url);
+      this._remoteCache.set(url, {
+        data,
+        expiry: Date.now() + REMOTE_CACHE_TTL_MS,
+      });
+      while (this._remoteCache.size > REMOTE_CACHE_MAX_ENTRIES) {
+        this._remoteCache.delete(this._remoteCache.keys().next().value);
+      }
+    }
+
+    return data;
   }
 
   _showRemoteError(text, generation, cancellable, message) {
@@ -3298,7 +3497,7 @@ export default class SearchBar extends Extension {
   }
 
   _prepareResultRows(count) {
-    this._removeSource("_selectionScrollTimeoutId");
+    this._removeLater("_selectionScrollLaterId");
     this._statusSpinner.stop();
     this._statusBox.hide();
     this._resultMetadataActors = [];
@@ -3412,7 +3611,7 @@ export default class SearchBar extends Extension {
     this._resultsState = "clearing";
     this._results = [];
     this._selectedIndex = -1;
-    this._removeSource("_selectionScrollTimeoutId");
+    this._removeLater("_selectionScrollLaterId");
     this._resultRows.forEach((row) => {
       row.disconnectObject(this);
       row.destroy();
@@ -3581,23 +3780,29 @@ export default class SearchBar extends Extension {
     if (this._selectedIndex >= 0) {
       this._queueScrollToSelection();
     } else {
-      this._removeSource("_selectionScrollTimeoutId");
+      this._removeLater("_selectionScrollLaterId");
     }
   }
 
   _queueScrollToSelection() {
-    this._removeSource("_selectionScrollTimeoutId");
+    this._removeLater("_selectionScrollLaterId");
 
     this._resultsBox.queue_relayout();
-    this._selectionScrollTimeoutId = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT,
-      0,
-      () => {
-        this._selectionScrollTimeoutId = null;
-        this._scrollToSelection();
+    // _scrollToSelection reads allocations, so it has to run after the relayout
+    // queued above. BEFORE_REDRAW would not do: laters run from the stage's
+    // before-update, which is still ahead of clutter_stage_maybe_relayout, so
+    // it would read the previous frame's geometry — as would the zero-delay
+    // PRIORITY_DEFAULT timeout this used to be. IDLE runs at
+    // G_PRIORITY_DEFAULT_IDLE (200), below the frame clock's
+    // CLUTTER_PRIORITY_REDRAW (150), so the frame that performs the relayout
+    // goes first. The cost is that sustained animation can delay it.
+    this._selectionScrollLaterId = global.compositor
+      .get_laters()
+      .add(Meta.LaterType.IDLE, () => {
+        this._selectionScrollLaterId = null;
+        if (this._enabled) this._scrollToSelection();
         return GLib.SOURCE_REMOVE;
-      },
-    );
+      });
   }
 
   _scrollToSelection() {
@@ -3642,18 +3847,18 @@ export default class SearchBar extends Extension {
   }
 
   _queueResultsHeightUpdate() {
-    this._removeSource("_resultsHeightTimeoutId");
+    this._removeLater("_resultsHeightLaterId");
     if (this._resultsState === "hidden") return;
 
-    this._resultsHeightTimeoutId = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT,
-      0,
-      () => {
-        this._resultsHeightTimeoutId = null;
+    // Reads allocation-derived widths, so it needs the settled layout for the
+    // same reason _queueScrollToSelection does.
+    this._resultsHeightLaterId = global.compositor
+      .get_laters()
+      .add(Meta.LaterType.IDLE, () => {
+        this._resultsHeightLaterId = null;
         if (this._enabled) this._updateResultsHeight(false);
         return GLib.SOURCE_REMOVE;
-      },
-    );
+      });
   }
 
   _setResultsHeight(targetHeight, animate = true) {
