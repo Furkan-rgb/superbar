@@ -395,6 +395,7 @@ export default class SearchBar extends Extension {
     this._loadRankingHistory();
     this._session = new Soup.Session();
     this._clipboard = St.Clipboard.get_default();
+    this._clipboardSelection = null;
     this._clipboardHistory = [];
     this._clipboardSearchHistory = null;
     this._loadClipboardHistory();
@@ -1031,12 +1032,12 @@ export default class SearchBar extends Extension {
     this._conflictDialog?.close();
     this._conflictDialog = null;
     this._removeSource("_conflictPromptId");
-    this._removeSource("_clipboardPollId");
     this._cancelPendingSearch();
     this._removeSource("_selectionScrollTimeoutId");
     this._removeSource("_resultsHeightTimeoutId");
 
     this._settings?.disconnectObject(this);
+    this._clipboardSelection?.disconnectObject(this);
     this._searchProviderSettings?.disconnectObject(this);
     this._appSystem?.disconnectObject(this);
     this._windowTracker?.disconnectObject(this);
@@ -1108,6 +1109,7 @@ export default class SearchBar extends Extension {
     this._themeContext = null;
     this._gnomeAppPalette = null;
     this._clipboard = null;
+    this._clipboardSelection = null;
     this._clipboardHistory = null;
     this._clipboardSearchHistory = null;
     this._rankingHistory?.clear();
@@ -1967,18 +1969,25 @@ export default class SearchBar extends Extension {
   }
 
   _startClipboardMonitoring() {
-    this._removeSource("_clipboardPollId");
+    this._clipboardSelection?.disconnectObject(this);
+    this._clipboardSelection = null;
     if (!this._settings.get_boolean("clipboard-monitor-enabled")) return;
 
-    this._pollClipboard();
-    this._clipboardPollId = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT,
-      1200,
-      () => {
+    // The extension runs inside the compositor, so Mutter's own selection
+    // object tells us when clipboard ownership changes instead of us polling
+    // for it. The signal only reports the change; the text still has to be
+    // read back asynchronously.
+    this._clipboardSelection = global.display.get_selection();
+    this._clipboardSelection.connectObject(
+      "owner-changed",
+      (_selection, selectionType) => {
+        // Also fires for PRIMARY (mouse selection) and drag-and-drop.
+        if (selectionType !== Meta.SelectionType.SELECTION_CLIPBOARD) return;
         this._pollClipboard();
-        return GLib.SOURCE_CONTINUE;
       },
+      this,
     );
+    this._pollClipboard();
   }
 
   _pollClipboard() {
