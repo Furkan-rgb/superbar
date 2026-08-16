@@ -8,6 +8,17 @@ Releases are cut by pushing a `v*` tag, which triggers the packaging workflow.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-16
+
+### Fixed
+
+- Tapping outside the bar on a touchscreen closes it. Dismissal listened for
+  `button-press-event`, which only ever fires for pointer buttons, so a touch
+  tap raised nothing and the bar stayed open behind whatever was tapped. It
+  uses a `Clutter.ClickGesture` now, which treats touch as a press of the
+  primary button. Dismissing with any mouse button, and clicking inside the
+  bar without dismissing it, both behave as before.
+
 ## [1.3.0] - 2026-08-16
 
 ### Added
@@ -146,7 +157,8 @@ Initial public release.
 - Bottom-positioned results layout and configurable divider visibility.
 - Showcase rendering script with a high-resolution render scale option.
 
-[Unreleased]: https://github.com/Furkan-rgb/superbar/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/Furkan-rgb/superbar/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/Furkan-rgb/superbar/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Furkan-rgb/superbar/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/Furkan-rgb/superbar/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Furkan-rgb/superbar/compare/v1.1.1...v1.2.0

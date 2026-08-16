@@ -1496,6 +1496,8 @@ export default class SearchBar extends Extension {
   _destroyClickShield() {
     if (!this._clickShield) return;
 
+    this._clickShieldGesture?.disconnectObject(this);
+    this._clickShieldGesture = null;
     this._clickShield.disconnectObject(this);
     Main.layoutManager.removeChrome(this._clickShield);
     this._clickShield.destroy();
@@ -1575,14 +1577,20 @@ export default class SearchBar extends Extension {
     this._container
       .get_parent()
       .set_child_above_sibling(this._container, this._clickShield);
-    this._clickShield.connectObject(
-      "button-press-event",
-      () => {
-        this._closeSearch();
-        return Clutter.EVENT_STOP;
-      },
+    // button-press-event only ever fired for pointer buttons, so a touch tap
+    // outside the bar raised nothing and left it open. A gesture covers both:
+    // touch counts as a press of the primary button.
+    this._clickShieldGesture = new Clutter.ClickGesture();
+    // Both restore what button-press-event did: close on the press rather than
+    // waiting for the release, and accept any button rather than only primary.
+    this._clickShieldGesture.set_recognize_on_press(true);
+    this._clickShieldGesture.set_required_button(0);
+    this._clickShieldGesture.connectObject(
+      "recognize",
+      () => this._closeSearch(),
       this,
     );
+    this._clickShield.add_action(this._clickShieldGesture);
 
     this._container.remove_all_transitions();
     this._container.opacity = 0;
