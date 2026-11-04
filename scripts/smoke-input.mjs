@@ -30,7 +30,7 @@ const SETTLE_MS = 600;
 const SETUP = `
 (() => {
   const Clutter = imports.gi.Clutter;
-  const seat = Clutter.get_default_backend().get_default_seat();
+  const seat = global.stage.context.get_backend().get_default_seat();
   globalThis.__smoke = {
     superbar: Main.extensionManager.lookup('${SUPERBAR_UUID}').stateObj,
     keyboard: seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE),

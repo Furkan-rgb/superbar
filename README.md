@@ -4,7 +4,7 @@ A launcher and command bar for GNOME Shell, inspired by macOS Spotlight. Press
 **Alt+Space** by default and start typing. The shortcut can be changed in
 Superbar preferences.
 
-![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-49%20%7C%2050-blue)
+![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-49%20%7C%2050%20%7C%2051-blue)
 ![License](https://img.shields.io/badge/license-GPL--2.0--or--later-green)
 
 ---
@@ -73,7 +73,7 @@ Log out and back in if this is the first time installing.
 
 ## Requirements
 
-- GNOME Shell 49 or 50
+- GNOME Shell 49, 50, or 51
 - An internet connection for weather, dictionary, and currency features
 - LocalSearch (`localsearch`) or Tracker 3 (`tracker3`) for indexed file
   results; common-folder results remain available without either command
