@@ -26,6 +26,11 @@ Releases are cut by pushing a `v*` tag, which triggers the packaging workflow.
 
 ### Fixed
 
+- GNOME Shell 51 compatibility: replace the removed `St.BoxLayout.vertical`
+  property with `orientation` throughout the launcher and result cards, and
+  update the input smoke test to use the current Clutter backend API.
+- Handle launcher keys during event capture so GNOME Shell 51's text key
+  controller does not consume Backspace before it can clear the mode chip.
 - `make unit-gtk`, and so `make test`, could stop partway through and wait for
   a keypress. Its `waitFor` helper pumped the main loop with a blocking
   iteration, and both conditions it waits on — the dialog taking focus, and

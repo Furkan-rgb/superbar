@@ -530,7 +530,7 @@ export default class SearchBar extends Extension {
     });
     this._contentLayer = new St.BoxLayout({
       style_class: "spotlight-content",
-      vertical: true,
+      orientation: Clutter.Orientation.VERTICAL,
       x_expand: true,
       y_expand: true,
     });
@@ -540,7 +540,7 @@ export default class SearchBar extends Extension {
 
     this._inputRow = new St.BoxLayout({
       style_class: "spotlight-input-row",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
     });
 
     this._icon = new St.Icon({
@@ -562,7 +562,7 @@ export default class SearchBar extends Extension {
     // query.
     this._modeChip = new St.BoxLayout({
       style_class: "spotlight-mode-chip",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       y_align: Clutter.ActorAlign.CENTER,
       visible: false,
     });
@@ -578,14 +578,14 @@ export default class SearchBar extends Extension {
 
     this._modeIndicator = new St.BoxLayout({
       style_class: "spotlight-mode-indicator",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       reactive: false,
       can_focus: false,
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._modeInner = new St.BoxLayout({
       style_class: "spotlight-mode-inner",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._modeDot = new St.Widget({
@@ -611,13 +611,13 @@ export default class SearchBar extends Extension {
 
     this._resultsBox = new St.BoxLayout({
       style_class: "spotlight-results-box",
-      vertical: true,
+      orientation: Clutter.Orientation.VERTICAL,
       x_expand: true,
     });
 
     this._statusBox = new St.BoxLayout({
       style_class: "spotlight-status",
-      vertical: true,
+      orientation: Clutter.Orientation.VERTICAL,
       x_expand: true,
       y_expand: true,
       visible: false,
@@ -677,12 +677,12 @@ export default class SearchBar extends Extension {
 
     this._footer = new St.BoxLayout({
       style_class: "spotlight-footer",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       x_expand: true,
     });
     this._actionsHint = new St.BoxLayout({
       style_class: "spotlight-actions-hint",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._actionsKey = new St.Label({
@@ -702,14 +702,14 @@ export default class SearchBar extends Extension {
 
     this._footerHints = new St.BoxLayout({
       style_class: "spotlight-footer-hints",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       x_align: Clutter.ActorAlign.END,
       y_align: Clutter.ActorAlign.CENTER,
     });
     const createFooterHint = (key, label) => {
       const hint = new St.BoxLayout({
         style_class: "spotlight-footer-hint",
-        vertical: false,
+        orientation: Clutter.Orientation.HORIZONTAL,
         y_align: Clutter.ActorAlign.CENTER,
       });
       hint.add_child(
@@ -729,10 +729,14 @@ export default class SearchBar extends Extension {
     this._footer.add_child(this._footerHints);
     this._contentLayer.add_child(this._footer);
 
+    // Handle launcher keys before ClutterText's built-in key controller can
+    // consume them (including Backspace in an empty entry on GNOME 51).
     this._entry.clutter_text.connectObject(
-      "key-press-event",
+      "captured-event",
       (actor, event) => {
-        if (!this._searchOpen) return Clutter.EVENT_PROPAGATE;
+        if (!this._searchOpen || event.type() !== Clutter.EventType.KEY_PRESS) {
+          return Clutter.EVENT_PROPAGATE;
+        }
 
         const key = event.get_key_symbol();
 
@@ -3495,7 +3499,7 @@ export default class SearchBar extends Extension {
         row.add_style_class_name("weather-card");
 
         const infoBox = new St.BoxLayout({
-          vertical: true,
+          orientation: Clutter.Orientation.VERTICAL,
           x_expand: true,
           y_align: Clutter.ActorAlign.CENTER,
         });
@@ -3520,7 +3524,7 @@ export default class SearchBar extends Extension {
 
         const card = new St.BoxLayout({
           style_class: "spotlight-weather-content",
-          vertical: false,
+          orientation: Clutter.Orientation.HORIZONTAL,
           x_expand: true,
         });
         card.add_child(this._createResultIcon(result));
@@ -3538,13 +3542,13 @@ export default class SearchBar extends Extension {
 
         const answerBox = new St.BoxLayout({
           style_class: "spotlight-answer-content",
-          vertical: false,
+          orientation: Clutter.Orientation.HORIZONTAL,
           x_expand: true,
         });
         answerBox.add_child(this._createResultIcon(result));
 
         const answerText = new St.BoxLayout({
-          vertical: true,
+          orientation: Clutter.Orientation.VERTICAL,
           x_expand: true,
           y_align: Clutter.ActorAlign.CENTER,
           style_class: "spotlight-result-text",
@@ -3577,13 +3581,13 @@ export default class SearchBar extends Extension {
       } else {
         const rowBox = new St.BoxLayout({
           style_class: "spotlight-result-row-content",
-          vertical: false,
+          orientation: Clutter.Orientation.HORIZONTAL,
           x_expand: true,
         });
         rowBox.add_child(this._createResultIcon(result));
 
         const textBox = new St.BoxLayout({
-          vertical: true,
+          orientation: Clutter.Orientation.VERTICAL,
           x_expand: true,
           y_align: Clutter.ActorAlign.CENTER,
           style_class: "spotlight-result-text",
