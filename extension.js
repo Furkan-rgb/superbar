@@ -12,8 +12,6 @@ import Soup from "gi://Soup";
 import GLib from "gi://GLib";
 import Pango from "gi://Pango";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
-import * as ModalDialog from "resource:///org/gnome/shell/ui/modalDialog.js";
-import * as Dialog from "resource:///org/gnome/shell/ui/dialog.js";
 import * as SystemActions from "resource:///org/gnome/shell/misc/systemActions.js";
 import * as Screenshot from "resource:///org/gnome/shell/ui/screenshot.js";
 import { Spinner } from "resource:///org/gnome/shell/ui/animation.js";
@@ -29,51 +27,9 @@ import {
 import { GnomeSearchProviderManager } from "./gnome-search-providers.js";
 import { buildSearchUri, getSearchEngine } from "./search-engines.js";
 import { getNextResultIndex } from "./result-selection.js";
-import {
-  ACTION_SYMBOL_PATTERN,
-  ACTION_WORD_PATTERN,
-  CLIPBOARD_QUERY_PATTERN,
-  cycleQueryMode,
-  getQueryModeByPrefix,
-  getQueryModeCycle,
-  getQueryModeToken,
-  matchTypedQueryMode,
-  parseDictionaryQuery,
-  parseWeatherQuery,
-} from "./query-modes.js";
-import {
-  describeAccel,
-  formatConflictSummary,
-} from "./keybinding-conflicts.js";
-import { findConflictsFor, replaceConflicts } from "./keybinding-settings.js";
 
-// Mutter keys its keybinding table on this name process-wide, so another
-// extension registering the same name makes ours fail. It cannot simply be
-// made unique: mutter also reads the accelerator from the GSettings key of the
-// same name, so renaming it means renaming the schema key and discarding every
-// shortcut a user has already set.
-const CONFLICT_PROMPT_RETRY_SECONDS = 2;
-const CONFLICT_PROMPT_MAX_ATTEMPTS = 30;
-const TOGGLE_KEYBINDING_NAME = "toggle-shortcut";
 const FILE_SEARCH_DELAY_MS = 80;
 const REMOTE_SEARCH_DELAY_MS = 220;
-// Clipboard writes are coalesced: a burst of copies produces one disk write
-// instead of one per entry.
-const CLIPBOARD_SAVE_DEBOUNCE_MS = 400;
-// Remote lookups are read-only and cheap to repeat, so a short cache spares the
-// third-party APIs when a query is retyped.
-const REMOTE_CACHE_TTL_MS = 5 * 60 * 1000;
-const REMOTE_CACHE_MAX_ENTRIES = 32;
-// libsoup forwards this to g_socket_set_timeout, so it is an inactivity budget
-// per I/O operation rather than a deadline for the whole request. A server that
-// keeps dribbling bytes is not covered.
-const NETWORK_IDLE_TIMEOUT_SECONDS = 10;
-// g_file_replace_contents copies an existing file's mode onto the temp file it
-// renames into place, which would defeat PRIVATE on every write after the
-// first. REPLACE_DESTINATION suppresses that copy (and refuses to follow a
-// symlink), so the history file ends up 0600 whether or not it already existed.
-const CLIPBOARD_FILE_FLAGS =
-  Gio.FileCreateFlags.PRIVATE | Gio.FileCreateFlags.REPLACE_DESTINATION;
 const RESULTS_REVEAL_ANIMATION_MS = 85;
 const RESULTS_COLLAPSE_ANIMATION_MS = 45;
 const RESULTS_MIN_HEIGHT = 120;
@@ -131,10 +87,6 @@ const QUERY_MODE_PRESENTATION = {
     iconName: "accessories-calculator-symbolic",
   },
 };
-const MODE_PROMPTS = {
-  weather: "Type a place name",
-  dictionary: "Type a word to define",
-};
 const CURRENCY_ALIASES = {
   yen: "JPY",
   euro: "EUR",
@@ -170,18 +122,6 @@ const SYSTEM_FOLDERS = [
   { name: "Videos", action: null },
   { name: "Music", action: null },
 ];
-
-// Every diagnostic goes through these two, so the journal carries one prefix
-// rather than the two spellings that had grown up in different parts of the
-// file, and there is a single place to quieten logging if it ever needs it.
-// Nothing here logs during normal operation — these are failure paths only.
-function logError(message) {
-  console.error(`Superbar: ${message}`);
-}
-
-function logWarning(message) {
-  console.warn(`Superbar: ${message}`);
-}
 
 function normalizeSearchText(value) {
   return String(value ?? "")
@@ -393,40 +333,22 @@ function ensureActorVisibleInScrollView(scrollView, actor) {
   }
 }
 
-export default class SearchBar extends Extension {
-  // The Shell marks an extension whose enable() throws as ERROR and never
-  // calls disable() for it, so anything already registered — the keybinding
-  // above all — would stay registered against a dead extension until the
-  // session restarts. Undo it here, then let the Shell report the failure.
-  enable() {
-    try {
-      this._enable();
-    } catch (error) {
-      try {
-        this.disable();
-      } catch (cleanupError) {
-        logError(`cleanup after a failed enable also failed: ${cleanupError}`);
-      }
-      throw error;
-    }
-  }
+// Inline reset for the search entry. Newer shells draw their own focus ring
+// (outline/border) around St.Entry; inline style beats any theme rule, so the
+// entry stays the flat, borderless field the stylesheet describes.
+const ENTRY_RESET_STYLE =
+  "border: none; border-width: 0; border-radius: 0; padding: 0; " +
+  "background-color: transparent; box-shadow: none; " +
+  "outline: none; outline-width: 0; outline-color: transparent; ";
 
-  _enable() {
+export default class SearchBar extends Extension {
+  enable() {
     this._enabled = true;
     this._searchGeneration = 0;
     this._pendingActivation = null;
     this._resumableSession = null;
     this._activeMonitorIndex = null;
     this._settings = this.getSettings();
-
-    // Grab the shortcut before building anything else. Setup below talks to
-    // D-Bus, the clipboard, and search providers; if any of that throws, the
-    // extension still answers the hotkey instead of looking enabled while
-    // silently having no way to open.
-    this._keybindingAdded = false;
-    this._ensureKeybinding();
-    this._queueConflictPrompt();
-
     this._shellSettings = St.Settings.get();
     this._themeContext = St.ThemeContext.get_for_stage(global.stage);
     try {
@@ -437,21 +359,11 @@ export default class SearchBar extends Extension {
       this._interfaceSettings = null;
     }
     this._rankingHistory = new Map();
-    this._lastRankingHistoryWrite = null;
     this._loadRankingHistory();
-    this._session = new Soup.Session({ timeout: NETWORK_IDLE_TIMEOUT_SECONDS });
-    this._remoteCache = new Map();
+    this._session = new Soup.Session();
     this._clipboard = St.Clipboard.get_default();
-    this._clipboardSelection = null;
     this._clipboardHistory = [];
     this._clipboardSearchHistory = null;
-    this._clipboardHistoryLoaded = false;
-    this._pendingClipboardEntries = [];
-    this._clipboardHistoryDirty = false;
-    this._clipboardSaveInFlight = false;
-    this._clipboardSaveId = null;
-    this._clipboardSaveCancellable = null;
-    this._clipboardLoadCancellable = null;
     this._loadClipboardHistory();
 
     try {
@@ -530,7 +442,7 @@ export default class SearchBar extends Extension {
     });
     this._contentLayer = new St.BoxLayout({
       style_class: "spotlight-content",
-      vertical: true,
+      orientation: Clutter.Orientation.VERTICAL,
       x_expand: true,
       y_expand: true,
     });
@@ -540,7 +452,7 @@ export default class SearchBar extends Extension {
 
     this._inputRow = new St.BoxLayout({
       style_class: "spotlight-input-row",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
     });
 
     this._icon = new St.Icon({
@@ -552,40 +464,25 @@ export default class SearchBar extends Extension {
     this._entry = new St.Entry({
       hint_text: "Search",
       style_class: "spotlight-entry",
+      style: ENTRY_RESET_STYLE,
       can_focus: true,
       x_expand: true,
       y_align: Clutter.ActorAlign.CENTER,
     });
 
-    // The active mode's prefix lives in a chip rather than in the entry, so it
-    // stays visible without the user having to edit around it to change the
-    // query.
-    this._modeChip = new St.BoxLayout({
-      style_class: "spotlight-mode-chip",
-      vertical: false,
-      y_align: Clutter.ActorAlign.CENTER,
-      visible: false,
-    });
-    this._modeChipLabel = new St.Label({
-      style_class: "spotlight-mode-chip-label",
-      y_align: Clutter.ActorAlign.CENTER,
-    });
-    this._modeChip.add_child(this._modeChipLabel);
-
     this._inputRow.add_child(this._icon);
-    this._inputRow.add_child(this._modeChip);
     this._inputRow.add_child(this._entry);
 
     this._modeIndicator = new St.BoxLayout({
       style_class: "spotlight-mode-indicator",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       reactive: false,
       can_focus: false,
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._modeInner = new St.BoxLayout({
       style_class: "spotlight-mode-inner",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._modeDot = new St.Widget({
@@ -611,13 +508,13 @@ export default class SearchBar extends Extension {
 
     this._resultsBox = new St.BoxLayout({
       style_class: "spotlight-results-box",
-      vertical: true,
+      orientation: Clutter.Orientation.VERTICAL,
       x_expand: true,
     });
 
     this._statusBox = new St.BoxLayout({
       style_class: "spotlight-status",
-      vertical: true,
+      orientation: Clutter.Orientation.VERTICAL,
       x_expand: true,
       y_expand: true,
       visible: false,
@@ -677,12 +574,12 @@ export default class SearchBar extends Extension {
 
     this._footer = new St.BoxLayout({
       style_class: "spotlight-footer",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       x_expand: true,
     });
     this._actionsHint = new St.BoxLayout({
       style_class: "spotlight-actions-hint",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       y_align: Clutter.ActorAlign.CENTER,
     });
     this._actionsKey = new St.Label({
@@ -702,14 +599,14 @@ export default class SearchBar extends Extension {
 
     this._footerHints = new St.BoxLayout({
       style_class: "spotlight-footer-hints",
-      vertical: false,
+      orientation: Clutter.Orientation.HORIZONTAL,
       x_align: Clutter.ActorAlign.END,
       y_align: Clutter.ActorAlign.CENTER,
     });
     const createFooterHint = (key, label) => {
       const hint = new St.BoxLayout({
         style_class: "spotlight-footer-hint",
-        vertical: false,
+        orientation: Clutter.Orientation.HORIZONTAL,
         y_align: Clutter.ActorAlign.CENTER,
       });
       hint.add_child(
@@ -721,11 +618,9 @@ export default class SearchBar extends Extension {
       this._footerHints.add_child(hint);
       return hint;
     };
-    this._modeHint = createFooterHint("Tab", "Mode");
     this._navigateHint = createFooterHint("↑↓", "Navigate");
     this._openHint = createFooterHint("↵", "Open");
     this._closeHint = createFooterHint("Esc", "Close");
-    this._updateModeHint();
     this._footer.add_child(this._footerHints);
     this._contentLayer.add_child(this._footer);
 
@@ -736,15 +631,7 @@ export default class SearchBar extends Extension {
 
         const key = event.get_key_symbol();
 
-        // Shift+Tab arrives as its own keysym, not as Tab with a modifier.
-        if (key === Clutter.KEY_Tab || key === Clutter.KEY_ISO_Left_Tab) {
-          const cycled = this._cycleQueryMode(
-            key === Clutter.KEY_ISO_Left_Tab ? -1 : 1,
-          );
-          return cycled ? Clutter.EVENT_STOP : Clutter.EVENT_PROPAGATE;
-        }
-
-        if (key === Clutter.KEY_Down) {
+        if (key === Clutter.KEY_Down || key === Clutter.KEY_Tab) {
           const nextIndex = getNextResultIndex(
             this._selectedIndex,
             this._results.length,
@@ -765,28 +652,12 @@ export default class SearchBar extends Extension {
         }
 
         if (key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter) {
-          const targetIndex =
-            this._selectedIndex > -1 ? this._selectedIndex : 0;
-          if (this._results.length > 0) {
-            this._activateResult(targetIndex);
-          } else {
-            this._queueFirstResultActivation();
-          }
-          return Clutter.EVENT_STOP;
-        }
-
-        if (
-          key === Clutter.KEY_BackSpace &&
-          this._queryModePrefix &&
-          this._isCaretAtStart()
-        ) {
-          this._setQueryModePrefix("");
-          this._onTextChanged();
+          this._handleEnter();
           return Clutter.EVENT_STOP;
         }
 
         if (key === Clutter.KEY_Escape) {
-          if (this._queryText().length > 0) {
+          if (this._entry.get_text().length > 0) {
             this._resetSearch();
           } else {
             this._closeSearch({ preserveSession: false });
@@ -796,6 +667,12 @@ export default class SearchBar extends Extension {
 
         return Clutter.EVENT_PROPAGATE;
       },
+      // GNOME 51 lets the text actor's own key handling consume Enter and emit
+      // "activate" before the legacy key-press-event signal is delivered, so
+      // listen for it too. _handleEnter() ignores the second call when both
+      // paths fire for the same key press.
+      "activate",
+      () => this._handleEnter(),
       "text-changed",
       () => this._onTextChanged(),
       this,
@@ -812,7 +689,6 @@ export default class SearchBar extends Extension {
     this._container.hide();
 
     this._searchOpen = false;
-    this._queryModePrefix = "";
     this._selectedIndex = -1;
     this._results = [];
     this._resultRows = [];
@@ -863,8 +739,6 @@ export default class SearchBar extends Extension {
     this._updateTheme();
 
     this._settings.connectObject(
-      "changed::toggle-shortcut",
-      () => this._ensureKeybinding(),
       "changed::bar-width",
       () => {
         this._repositionContainer();
@@ -894,17 +768,6 @@ export default class SearchBar extends Extension {
       () => this._refreshCurrentSearch(),
       "changed::ranking-history",
       () => {
-        // This key is written by the extension itself on every activation. Only
-        // an external write (prefs clearing the history) needs to be picked up;
-        // reacting to our own would reparse what we just serialized and re-run
-        // the whole search, which is visible when the panel stays open after a
-        // clipboard copy.
-        if (
-          this._settings.get_string("ranking-history") ===
-          this._lastRankingHistoryWrite
-        ) {
-          return;
-        }
         this._loadRankingHistory();
         this._refreshCurrentSearch();
       },
@@ -913,237 +776,31 @@ export default class SearchBar extends Extension {
     SEARCH_SOURCE_SETTING_KEYS.forEach((key) => {
       this._settings.connectObject(
         `changed::${key}`,
-        () => {
-          this._updateModeHint();
-          this._refreshCurrentSearch();
-        },
+        () => this._refreshCurrentSearch(),
         this,
       );
     });
 
-    this._startClipboardMonitoring();
-  }
-
-  // Mutter keeps the grab in sync with the GSettings key on its own, so this
-  // only ever has to register once. It is called again when the shortcut
-  // changes so that a combination rejected at startup can still take effect
-  // once the user picks a different one.
-  // GSettings keybinding keys are always lists; Superbar uses only the first
-  // entry, and an empty list means the shortcut was turned off.
-  _toggleAccel() {
-    const [accel = ""] = this._settings.get_strv("toggle-shortcut");
-    return accel;
-  }
-
-  _ensureKeybinding() {
-    if (this._keybindingAdded) return;
-
-    const action = Main.wm.addKeybinding(
-      TOGGLE_KEYBINDING_NAME,
+    Main.wm.addKeybinding(
+      "toggle-shortcut",
       this._settings,
       Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
-      Shell.ActionMode.NORMAL |
-        Shell.ActionMode.OVERVIEW |
-        Shell.ActionMode.POPUP,
+      Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
       this._toggleSearch.bind(this),
     );
 
-    if (action !== Meta.KeyBindingAction.NONE) {
-      this._keybindingAdded = true;
-      return;
-    }
-
-    // An empty list means the user deliberately disabled the shortcut.
-    const accel = this._toggleAccel();
-    if (!accel) return;
-
-    // Mutter refuses only when a keybinding of the same NAME already exists;
-    // it allows two grabs on one accelerator, which is the whole reason the
-    // conflict check below exists. So this is another extension having taken
-    // the name, and picking a different combination would not help.
-    logWarning(
-      `mutter refused the keybinding name ` +
-        `"${TOGGLE_KEYBINDING_NAME}"; another extension has registered it`,
-    );
-    Main.notify(
-      "Superbar could not register its shortcut",
-      `${describeAccel(accel)} could not be bound because another extension ` +
-        `registered the same keybinding name.`,
-    );
-  }
-
-  // GNOME assigns Alt+Space to the window menu and Superbar ships the same
-  // default, and mutter lets both grabs exist at once — so which one answers
-  // depends on what has focus, and the launcher reads as though it only works
-  // sometimes. Preferences shows the conflict, but someone who never opens
-  // preferences has no way to learn any of this, so say it once here.
-  _queueConflictPrompt() {
-    // Shell.ActionMode.NONE means the session cannot be interrupted right now:
-    // it is still starting, or something holds a modal grab — Alt+Tab, a drag,
-    // the lock screen. Opening a dialog then is worse than it sounds, because
-    // a modal grabs input while the Shell's uiGroup is still transparent and
-    // the user faces a dialog they cannot see.
-    //
-    // Waiting on startup-complete is not enough: that signal fires once per
-    // Shell process, so an extension enabled later — by the Extensions app, or
-    // mid-drag — would hook a signal that has already gone and never ask at
-    // all. Retrying a few times covers every case with public API only.
-    let attempts = 0;
-    this._conflictPromptId = GLib.timeout_add_seconds(
-      GLib.PRIORITY_DEFAULT,
-      CONFLICT_PROMPT_RETRY_SECONDS,
-      () => {
-        if (!this._enabled) {
-          this._conflictPromptId = null;
-          return GLib.SOURCE_REMOVE;
-        }
-
-        if (Main.actionMode === Shell.ActionMode.NONE) {
-          if (++attempts < CONFLICT_PROMPT_MAX_ATTEMPTS)
-            return GLib.SOURCE_CONTINUE;
-
-          // Someone has held a grab for minutes. Asking is not urgent enough
-          // to keep a timer alive for the rest of the session.
-          this._conflictPromptId = null;
-          return GLib.SOURCE_REMOVE;
-        }
-
-        this._conflictPromptId = null;
-        this._runConflictCheck();
-        return GLib.SOURCE_REMOVE;
-      },
-    );
-  }
-
-  _runConflictCheck() {
-    if (!this._enabled) return;
-
-    try {
-      this._presentConflictPrompt();
-    } catch (error) {
-      logWarning(`could not check the shortcut for conflicts: ${error}`);
-    }
-  }
-
-  _presentConflictPrompt() {
-    const accel = this._toggleAccel();
-    if (!accel) return;
-
-    const conflicts = findConflictsFor(accel);
-    if (conflicts.length === 0) return;
-
-    // Locking the screen disables the extension and unlocking enables it
-    // again, running this check afresh. Without remembering what was already
-    // asked, a conflict someone chose to leave alone would put this dialog on
-    // screen after every unlock. Picking a different shortcut asks again.
-    if (this._settings.get_string("conflict-prompt-accel") === accel) return;
-
-    // A banner is too easy to miss for something that decides whether the
-    // launcher opens at all, and leaving it unanswered leaves the shortcut in
-    // the state that made it look broken. Ask outright instead.
-    const dialog = new ModalDialog.ModalDialog({ destroyOnClose: true });
-    dialog.contentLayout.add_child(
-      new Dialog.MessageDialogContent({
-        title: `${describeAccel(accel)} is already in use`,
-        description:
-          `${describeAccel(accel)} opens Superbar. ` +
-          `${formatConflictSummary(conflicts)}.\n\n` +
-          `While both are assigned, which one responds depends on what has ` +
-          `focus, so Superbar will seem to open only sometimes. Anything ` +
-          `cleared here can be put back from Superbar preferences.`,
-      }),
-    );
-
-    dialog.setButtons([
-      // Not offered as "keep both": holding both is the broken state that
-      // makes the launcher look unreliable, and naming it as a choice invites
-      // people straight into it.
-      {
-        label: "Not Now",
-        action: () => dialog.close(),
-        key: Clutter.KEY_Escape,
-      },
-      {
-        label: "Choose Another",
-        action: () => {
-          dialog.close();
-          if (this._enabled) this.openPreferences();
-        },
-      },
-      {
-        label: "Use for Superbar",
-        action: () => {
-          dialog.close();
-          // Runs from a Clutter signal handler: anything thrown here would
-          // escape into the Shell's main loop.
-          try {
-            if (this._enabled) this._claimShortcut();
-          } catch (error) {
-            logError(`could not take over the shortcut: ${error}`);
-          }
-        },
-        default: true,
-      },
-    ]);
-
-    // The dialog parents itself into the Shell's modalDialogGroup, not into
-    // anything this extension owns, so disable() has to be able to close it —
-    // locking the screen disables the extension with the dialog still up.
-    this._conflictDialog = dialog;
-    dialog.connect("closed", () => {
-      this._conflictDialog = null;
-    });
-
-    dialog.open();
-
-    // Recorded only once the question is actually on screen: committing before
-    // that would let an interruption suppress it permanently.
-    this._settings.set_string("conflict-prompt-accel", accel);
-  }
-
-  // Rescans rather than reusing the conflicts the dialog was built from: the
-  // dialog can stay on screen for a long time, and acting on what was true
-  // when it opened could clear a shortcut the user has since changed.
-  _claimShortcut() {
-    const accel = this._toggleAccel();
-    if (!accel) return;
-
-    const conflicts = findConflictsFor(accel);
-    if (conflicts.length === 0) return;
-
-    const cleared = replaceConflicts(this._settings, conflicts);
-    if (cleared.length === 0) {
-      Main.notify(
-        "Superbar could not take over the shortcut",
-        `${describeAccel(accel)} could not be cleared. Choose a different shortcut in Superbar preferences.`,
-      );
-      return;
-    }
-
-    Main.notify(
-      `${describeAccel(accel)} now opens only Superbar`,
-      "The shortcuts that were cleared can be put back from Superbar preferences.",
-    );
+    this._startClipboardMonitoring();
   }
 
   disable() {
     this._enabled = false;
-    if (this._keybindingAdded) {
-      Main.wm.removeKeybinding(TOGGLE_KEYBINDING_NAME);
-      this._keybindingAdded = false;
-    }
-    this._conflictDialog?.close();
-    this._conflictDialog = null;
-    this._removeSource("_conflictPromptId");
+    Main.wm.removeKeybinding("toggle-shortcut");
+    this._removeSource("_clipboardPollId");
     this._cancelPendingSearch();
-    this._removeLater("_selectionScrollLaterId");
-    this._removeLater("_resultsHeightLaterId");
-    this._clipboardLoadCancellable?.cancel();
-    this._clipboardLoadCancellable = null;
-    this._flushClipboardHistoryNow();
+    this._removeSource("_selectionScrollTimeoutId");
+    this._removeSource("_resultsHeightTimeoutId");
 
     this._settings?.disconnectObject(this);
-    this._clipboardSelection?.disconnectObject(this);
     this._searchProviderSettings?.disconnectObject(this);
     this._appSystem?.disconnectObject(this);
     this._windowTracker?.disconnectObject(this);
@@ -1195,9 +852,6 @@ export default class SearchBar extends Extension {
     this._actionsKey = null;
     this._footerSpacer = null;
     this._footerHints = null;
-    this._modeChip = null;
-    this._modeChipLabel = null;
-    this._modeHint = null;
     this._navigateHint = null;
     this._openHint = null;
     this._closeHint = null;
@@ -1218,18 +872,10 @@ export default class SearchBar extends Extension {
     this._themeContext = null;
     this._gnomeAppPalette = null;
     this._clipboard = null;
-    this._clipboardSelection = null;
     this._clipboardHistory = null;
     this._clipboardSearchHistory = null;
-    this._pendingClipboardEntries = null;
-    this._clipboardHistoryLoaded = false;
-    this._clipboardSaveCancellable = null;
-    this._clipboardLoadCancellable = null;
-    this._remoteCache?.clear();
-    this._remoteCache = null;
     this._rankingHistory?.clear();
     this._rankingHistory = null;
-    this._lastRankingHistoryWrite = null;
     this._results = null;
     this._resultRows = null;
     this._resultMetadataActors = null;
@@ -1252,18 +898,8 @@ export default class SearchBar extends Extension {
     this[propertyName] = null;
   }
 
-  // Laters live on the compositor rather than the main loop, so they are
-  // cancelled through MetaLaters instead of GLib.Source.
-  _removeLater(propertyName) {
-    const laterId = this[propertyName];
-    if (!laterId) return;
-
-    global.compositor.get_laters().remove(laterId);
-    this[propertyName] = null;
-  }
-
   _refreshCurrentSearch() {
-    if (!this._searchOpen || !this._queryText().trim()) return;
+    if (!this._searchOpen || !this._entry?.get_text().trim()) return;
     this._onTextChanged(true);
   }
 
@@ -1323,7 +959,6 @@ export default class SearchBar extends Extension {
 
     const serialized = JSON.stringify(entries);
     if (serialized !== this._settings.get_string("ranking-history")) {
-      this._lastRankingHistoryWrite = serialized;
       this._settings.set_string("ranking-history", serialized);
     }
   }
@@ -1388,12 +1023,10 @@ export default class SearchBar extends Extension {
     this._saveRankingHistory();
   }
 
-  // Against the whole query, chip included: a deferred search carries the text
-  // it was scheduled for, and the entry holds only the part after the prefix.
   _isCurrentQuery(text, generation = null) {
     return (
       this._enabled &&
-      this._queryText().trim() === text &&
+      this._entry?.get_text().trim() === text &&
       (generation === null || generation === this._searchGeneration)
     );
   }
@@ -1420,8 +1053,23 @@ export default class SearchBar extends Extension {
     }
   }
 
+  _handleEnter() {
+    if (!this._searchOpen) return;
+
+    const now = GLib.get_monotonic_time();
+    if (this._lastEnterUs && now - this._lastEnterUs < 200000) return;
+    this._lastEnterUs = now;
+
+    const targetIndex = this._selectedIndex > -1 ? this._selectedIndex : 0;
+    if (this._results.length > 0) {
+      this._activateResult(targetIndex);
+    } else {
+      this._queueFirstResultActivation();
+    }
+  }
+
   _queueFirstResultActivation() {
-    const text = this._queryText().trim();
+    const text = this._entry?.get_text().trim();
     if (!text) return;
 
     this._pendingActivation = {
@@ -1449,7 +1097,7 @@ export default class SearchBar extends Extension {
   }
 
   _saveResumableSession() {
-    const text = this._queryText();
+    const text = this._entry?.get_text() ?? "";
     if (!text.trim()) {
       this._resumableSession = null;
       return false;
@@ -1475,7 +1123,7 @@ export default class SearchBar extends Extension {
     if (
       age < 0 ||
       age > RESUMABLE_SESSION_TTL_MS ||
-      this._queryText() !== session.text
+      this._entry?.get_text() !== session.text
     ) {
       return null;
     }
@@ -1496,8 +1144,6 @@ export default class SearchBar extends Extension {
   _destroyClickShield() {
     if (!this._clickShield) return;
 
-    this._clickShieldGesture?.disconnectObject(this);
-    this._clickShieldGesture = null;
     this._clickShield.disconnectObject(this);
     Main.layoutManager.removeChrome(this._clickShield);
     this._clickShield.destroy();
@@ -1505,10 +1151,6 @@ export default class SearchBar extends Extension {
   }
 
   _toggleSearch() {
-    // The shortcut is registered before the UI is built, so a failure part way
-    // through enable() can leave the handler live with nothing to show.
-    if (!this._enabled || !this._container || !this._entry) return;
-
     if (this._searchOpen) {
       this._closeSearch();
     } else {
@@ -1521,33 +1163,11 @@ export default class SearchBar extends Extension {
 
     this._activeMonitorIndex = this._getTargetMonitorIndex();
     this._searchOpen = true;
-
-    try {
-      this._presentSearch();
-    } catch (error) {
-      // Without this the flag stays true while nothing is on screen, and the
-      // shortcut reads as dead until it has been pressed a second time to
-      // toggle the state back.
-      logError(`failed to open the search bar: ${error}`);
-      this._abandonOpenSearch();
-    }
-  }
-
-  _abandonOpenSearch() {
-    this._searchOpen = false;
-    // The entry may already hold stage key focus; leaving it there once the
-    // container is hidden swallows every keystroke until something else takes
-    // focus back.
-    global.stage.set_key_focus(null);
-    this._destroyClickShield();
-    this._container?.remove_all_transitions();
-    this._container?.hide();
-  }
-
-  _presentSearch() {
     const resumableSession = this._takeResumableSession();
     const resumed = resumableSession !== null;
-    const currentQuery = this._classifyQuery(this._queryText());
+    const currentQuery = this._classifyQuery(
+      this._entry.get_text().trim(),
+    );
 
     if (resumed) {
       if (
@@ -1577,20 +1197,14 @@ export default class SearchBar extends Extension {
     this._container
       .get_parent()
       .set_child_above_sibling(this._container, this._clickShield);
-    // button-press-event only ever fired for pointer buttons, so a touch tap
-    // outside the bar raised nothing and left it open. A gesture covers both:
-    // touch counts as a press of the primary button.
-    this._clickShieldGesture = new Clutter.ClickGesture();
-    // Both restore what button-press-event did: close on the press rather than
-    // waiting for the release, and accept any button rather than only primary.
-    this._clickShieldGesture.set_recognize_on_press(true);
-    this._clickShieldGesture.set_required_button(0);
-    this._clickShieldGesture.connectObject(
-      "recognize",
-      () => this._closeSearch(),
+    this._clickShield.connectObject(
+      "button-press-event",
+      () => {
+        this._closeSearch();
+        return Clutter.EVENT_STOP;
+      },
       this,
     );
-    this._clickShield.add_action(this._clickShieldGesture);
 
     this._container.remove_all_transitions();
     this._container.opacity = 0;
@@ -1642,19 +1256,14 @@ export default class SearchBar extends Extension {
   }
 
   _resetSearch() {
-    this._removeLater("_selectionScrollLaterId");
+    this._removeSource("_selectionScrollTimeoutId");
     this._copiedClipboardValue = null;
     this._clipboardSearchHistory = null;
-
-    const hadModePrefix = this._queryModePrefix.length > 0;
-    this._setQueryModePrefix("");
 
     if (this._entry.get_text().length > 0) {
       // set_text() emits text-changed synchronously, which invalidates the
       // active generation and cancels pending work in one place.
       this._entry.set_text("");
-    } else if (hadModePrefix) {
-      this._onTextChanged();
     } else {
       this._invalidatePendingSearch({ clearResumableSession: true });
       this._hideResults();
@@ -1664,16 +1273,11 @@ export default class SearchBar extends Extension {
   // --- Search ---
 
   _onTextChanged(preserveSelection = false) {
-    // Promotion rewrites the entry, which re-enters here with the prefix
-    // already lifted into the chip.
-    if (this._promoteTypedQueryMode()) return;
-
-    const raw = this._queryText();
-    const text = raw.trim();
+    const text = this._entry.get_text().trim();
     const generation = this._invalidatePendingSearch({
       clearResumableSession: true,
     });
-    const query = this._classifyQuery(raw);
+    const query = this._classifyQuery(text);
     if (query.kind === "clipboard") {
       // Keep clipboard results in their entry order for this query session.
       // The monitor still updates the persisted MRU order, which becomes
@@ -1688,13 +1292,6 @@ export default class SearchBar extends Extension {
 
     if (text.length === 0) {
       this._hideResults();
-      return;
-    }
-
-    // A mode reached by Tab starts with no argument, and there is nothing to
-    // ask a third-party API for until one is typed.
-    if (query.payload === "" && MODE_PROMPTS[query.kind]) {
-      this._showStatus("empty", MODE_PROMPTS[query.kind]);
       return;
     }
 
@@ -1851,11 +1448,17 @@ export default class SearchBar extends Extension {
   }
 
   _parseWeatherQuery(text) {
-    return parseWeatherQuery(text);
+    const match = text
+      .trim()
+      .match(
+        /^(?:weather|temp(?:erature)?|forecast|humidity|rain|snow|wind|hot|cold|clima|meteo)\s+(.+)$/i,
+      );
+    return match ? match[1].trim() : null;
   }
 
   _parseDictionaryQuery(text) {
-    return parseDictionaryQuery(text);
+    const match = text.trim().match(/^def(?:ine)?\s+(.+)$/i);
+    return match ? match[1].trim() : null;
   }
 
   _classifyQuery(text) {
@@ -1902,18 +1505,17 @@ export default class SearchBar extends Extension {
       return { kind: "actions", payload: actionQuery };
     }
 
-    const trimmed = text.trim();
     if (
       this._isSearchSourceEnabled("calculator-search-enabled") &&
-      this._isMathExpression(trimmed)
+      this._isMathExpression(text)
     ) {
-      const result = evaluateMathExpression(trimmed);
+      const result = evaluateMathExpression(text);
       if (result !== null) {
         return { kind: "calculator", payload: result };
       }
     }
 
-    return { kind: "generic", payload: trimmed };
+    return { kind: "generic", payload: text };
   }
 
   _applyQueryMode(query) {
@@ -1921,76 +1523,6 @@ export default class SearchBar extends Extension {
       QUERY_MODE_PRESENTATION[query.kind] ?? QUERY_MODE_PRESENTATION.generic;
     this._icon.icon_name = mode.iconName;
     if (this._modeLabel) this._modeLabel.text = mode.label;
-  }
-
-  // The chip holds a prefix that would otherwise sit in the entry, so the query
-  // everything downstream reads is the two joined back together.
-  _queryText() {
-    return `${this._queryModePrefix}${this._entry?.get_text() ?? ""}`;
-  }
-
-  // An empty entry reports its caret as -1 rather than 0, and a selection has
-  // to keep Backspace for itself.
-  _isCaretAtStart() {
-    const clutterText = this._entry.clutter_text;
-    if (clutterText.get_selection()) return false;
-    return (
-      this._entry.get_text().length === 0 ||
-      clutterText.get_cursor_position() === 0
-    );
-  }
-
-  _setQueryModePrefix(prefix) {
-    if (this._queryModePrefix === prefix) return;
-
-    this._queryModePrefix = prefix;
-    const token = getQueryModeToken(prefix);
-    if (this._modeChipLabel) this._modeChipLabel.text = token;
-    if (this._modeChip) this._modeChip.visible = token.length > 0;
-    if (this._entry) this._entry.hint_text = getQueryModeByPrefix(prefix).hint;
-  }
-
-  _cycleQueryMode(direction) {
-    const next = cycleQueryMode({
-      text: this._entry.get_text(),
-      kind: this._classifyQuery(this._queryText()).kind,
-      direction,
-      isModeEnabled: (key) => this._isSearchSourceEnabled(key),
-    });
-    if (next === null) return false;
-
-    this._setQueryModePrefix(next.prefix);
-    // set_text only fires the search when the text actually changes, so an
-    // unchanged entry has to be searched by hand.
-    if (next.query === this._entry.get_text()) {
-      this._onTextChanged();
-    } else {
-      this._entry.set_text(next.query);
-    }
-    this._entry.clutter_text.set_cursor_position(next.query.length);
-    return true;
-  }
-
-  // Typing "clip " should arrive at the same place as pressing Tab.
-  _promoteTypedQueryMode() {
-    if (this._queryModePrefix) return false;
-
-    const typed = matchTypedQueryMode(this._entry.get_text(), (key) =>
-      this._isSearchSourceEnabled(key),
-    );
-    if (typed === null) return false;
-
-    this._setQueryModePrefix(typed.mode.prefix);
-    this._entry.set_text(typed.query);
-    this._entry.clutter_text.set_cursor_position(typed.query.length);
-    return true;
-  }
-
-  // A cycle of one leaves Tab with nothing to do, so stop advertising it.
-  _updateModeHint() {
-    if (!this._modeHint) return;
-    this._modeHint.visible =
-      getQueryModeCycle((key) => this._isSearchSourceEnabled(key)).length > 1;
   }
 
   _scheduleCurrentQuery(text, generation, delay, callback) {
@@ -2125,7 +1657,9 @@ export default class SearchBar extends Extension {
 
   _parseClipboardQuery(text) {
     const normalized = text.trim();
-    const match = normalized.match(CLIPBOARD_QUERY_PATTERN);
+    const match = normalized.match(
+      /^(?:clipboard|clip|history)(?:(?::|\s+)(.*))?$/i,
+    );
     if (!match) return null;
     return (match[1] ?? "").trim();
   }
@@ -2138,142 +1672,30 @@ export default class SearchBar extends Extension {
   }
 
   _loadClipboardHistory() {
-    const historyPath = this._getClipboardHistoryPath();
-    const file = Gio.File.new_for_path(historyPath);
-    // disable() and enable() run on every screen lock, so without a cancellable
-    // a load started before the lock can land after the unlock and overwrite
-    // the state the new cycle has already built up.
-    const cancellable = new Gio.Cancellable();
-    this._clipboardLoadCancellable = cancellable;
-
-    file.load_contents_async(cancellable, (_file, res) => {
-      if (this._clipboardLoadCancellable === cancellable) {
-        this._clipboardLoadCancellable = null;
-      }
-      if (!this._enabled || cancellable.is_cancelled()) return;
-
+    const file = Gio.File.new_for_path(this._getClipboardHistoryPath());
+    file.load_contents_async(null, (_file, res) => {
       try {
         const [success, contents] = file.load_contents_finish(res);
-        if (!success) return;
-
+        if (!this._enabled || !success) return;
         const data = JSON.parse(new TextDecoder().decode(contents));
-        // A clear that happened while this load was in flight already
-        // established the authoritative state; restoring the file we read
-        // before it would resurrect the entries the user just deleted.
-        if (Array.isArray(data) && !this._clipboardHistoryLoaded) {
-          this._clipboardHistory = data
-            .filter((entry) => typeof entry?.text === "string")
-            .slice(0, this._settings.get_int("clipboard-history-limit"));
-        }
+        if (!Array.isArray(data)) return;
+        this._clipboardHistory = data
+          .filter((entry) => typeof entry?.text === "string")
+          .slice(0, this._settings.get_int("clipboard-history-limit"));
       } catch (_e) {
         // history file missing or corrupt; start fresh
-      } finally {
-        // g_file_replace_contents preserves an existing file's mode, so PRIVATE
-        // alone never retightens a history file written by an older version.
-        // This has to run whether or not the contents parsed.
-        GLib.chmod(historyPath, 0o600);
-        this._flushPendingClipboardEntries();
       }
     });
   }
 
-  // Captures that arrive before the history file has finished loading are held
-  // back: storing them immediately would append to a still-empty list and
-  // overwrite the saved history on disk, and the load would then discard the
-  // captured entry.
-  _flushPendingClipboardEntries() {
-    if (this._clipboardHistoryLoaded) return;
-    this._clipboardHistoryLoaded = true;
-
-    const pending = this._pendingClipboardEntries ?? [];
-    this._pendingClipboardEntries = [];
-    pending.forEach((text) => this._storeClipboardEntry(text));
-  }
-
   _saveClipboardHistory() {
-    this._clipboardHistoryDirty = true;
-    if (this._clipboardSaveId) return;
-
-    this._clipboardSaveId = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT_IDLE,
-      CLIPBOARD_SAVE_DEBOUNCE_MS,
-      () => {
-        this._clipboardSaveId = null;
-        this._writeClipboardHistory();
-        return GLib.SOURCE_REMOVE;
-      },
-    );
-  }
-
-  _writeClipboardHistory() {
-    // A second write while one is in flight would race it, so leave the dirty
-    // flag set and let the in-flight completion pick the newer state up.
-    if (!this._clipboardHistoryDirty || this._clipboardSaveInFlight) return;
-
-    this._clipboardHistoryDirty = false;
-    this._clipboardSaveInFlight = true;
-
-    const cancellable = new Gio.Cancellable();
-    this._clipboardSaveCancellable = cancellable;
-
-    const file = Gio.File.new_for_path(this._getClipboardHistoryPath());
-    file.replace_contents_bytes_async(
-      new GLib.Bytes(this._encodeClipboardHistory()),
-      null,
-      false,
-      CLIPBOARD_FILE_FLAGS,
-      cancellable,
-      (_file, res) => {
-        // A callback from a superseded write must not clear the latch belonging
-        // to the write that replaced it.
-        if (this._clipboardSaveCancellable !== cancellable) return;
-
-        this._clipboardSaveCancellable = null;
-        this._clipboardSaveInFlight = false;
-        try {
-          file.replace_contents_finish(res);
-        } catch (_e) {
-          // save errors are non-fatal; silently ignore
-        }
-        if (this._enabled && this._clipboardHistoryDirty) {
-          this._writeClipboardHistory();
-        }
-      },
-    );
-  }
-
-  _encodeClipboardHistory() {
-    return new TextEncoder().encode(
-      JSON.stringify(this._clipboardHistory ?? []),
-    );
-  }
-
-  // disable() cannot wait on an async write, so a still-pending save is flushed
-  // synchronously. Same creation flags, so the permissions stay correct.
-  _flushClipboardHistoryNow() {
-    this._removeSource("_clipboardSaveId");
-
-    if (this._clipboardSaveInFlight) {
-      // An in-flight write cannot be waited on, and letting it land after the
-      // synchronous one below would put stale content back on disk. The write
-      // below carries the current history, so cancelling loses nothing.
-      this._clipboardSaveCancellable?.cancel();
-      this._clipboardSaveCancellable = null;
-      this._clipboardSaveInFlight = false;
-      this._clipboardHistoryDirty = true;
-    }
-
-    if (!this._clipboardHistoryDirty) return;
-
-    this._clipboardHistoryDirty = false;
     try {
-      Gio.File.new_for_path(this._getClipboardHistoryPath()).replace_contents(
-        this._encodeClipboardHistory(),
-        null,
-        false,
-        CLIPBOARD_FILE_FLAGS,
-        null,
+      const historyPath = this._getClipboardHistoryPath();
+      GLib.file_set_contents(
+        historyPath,
+        JSON.stringify(this._clipboardHistory),
       );
+      GLib.chmod(historyPath, 0o600);
     } catch (_e) {
       // save errors are non-fatal; silently ignore
     }
@@ -2282,10 +1704,6 @@ export default class SearchBar extends Extension {
   _clearClipboardHistory() {
     this._clipboardHistory = [];
     this._clipboardSearchHistory = null;
-    this._pendingClipboardEntries = [];
-    // An empty history is authoritative, so a load still in flight must not
-    // write the pre-clear contents back over it.
-    this._clipboardHistoryLoaded = true;
     this._saveClipboardHistory();
 
     if (
@@ -2295,30 +1713,23 @@ export default class SearchBar extends Extension {
       return;
     }
 
-    const query = this._parseClipboardQuery(this._queryText().trim());
+    const query = this._parseClipboardQuery(this._entry.get_text().trim());
     if (query !== null) this._showResults([]);
   }
 
   _startClipboardMonitoring() {
-    this._clipboardSelection?.disconnectObject(this);
-    this._clipboardSelection = null;
+    this._removeSource("_clipboardPollId");
     if (!this._settings.get_boolean("clipboard-monitor-enabled")) return;
 
-    // The extension runs inside the compositor, so Mutter's own selection
-    // object tells us when clipboard ownership changes instead of us polling
-    // for it. The signal only reports the change; the text still has to be
-    // read back asynchronously.
-    this._clipboardSelection = global.display.get_selection();
-    this._clipboardSelection.connectObject(
-      "owner-changed",
-      (_selection, selectionType) => {
-        // Also fires for PRIMARY (mouse selection) and drag-and-drop.
-        if (selectionType !== Meta.SelectionType.SELECTION_CLIPBOARD) return;
-        this._pollClipboard();
-      },
-      this,
-    );
     this._pollClipboard();
+    this._clipboardPollId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      1200,
+      () => {
+        this._pollClipboard();
+        return GLib.SOURCE_CONTINUE;
+      },
+    );
   }
 
   _pollClipboard() {
@@ -2334,11 +1745,6 @@ export default class SearchBar extends Extension {
 
     const normalized = text.trim();
     if (!normalized) return;
-
-    if (!this._clipboardHistoryLoaded) {
-      this._pendingClipboardEntries.push(text);
-      return;
-    }
 
     if (this._clipboardHistory[0]?.text === text) return;
 
@@ -2357,7 +1763,7 @@ export default class SearchBar extends Extension {
       this._searchOpen &&
       this._isSearchSourceEnabled("clipboard-search-enabled")
     ) {
-      const query = this._parseClipboardQuery(this._queryText().trim());
+      const query = this._parseClipboardQuery(this._entry.get_text().trim());
       if (query !== null) {
         this._showResults(this._searchClipboardHistory(query), true);
       }
@@ -2478,10 +1884,12 @@ export default class SearchBar extends Extension {
     const normalized = text.trim();
     if (normalized === ">") return "";
 
-    const symbolMatch = normalized.match(ACTION_SYMBOL_PATTERN);
+    const symbolMatch = normalized.match(/^>\s*(.*)$/);
     if (symbolMatch) return symbolMatch[1].trim();
 
-    const prefixMatch = normalized.match(ACTION_WORD_PATTERN);
+    const prefixMatch = normalized.match(
+      /^(?:command|cmd|action)(?:(?::|\s+)(.*))?$/i,
+    );
     if (prefixMatch) return (prefixMatch[1] ?? "").trim();
 
     return null;
@@ -3100,7 +2508,7 @@ export default class SearchBar extends Extension {
         );
       }
     } catch (e) {
-      logError(`action failed (${result.label}): ${e.message}`);
+      console.error(`[Superbar] Action failed (${result.label}): ${e.message}`);
     }
   }
 
@@ -3187,32 +2595,12 @@ export default class SearchBar extends Extension {
   // --- Web Fetches ---
 
   async _fetchJson(url, cancellable) {
-    const cached = this._remoteCache?.get(url);
-    if (cached && cached.expiry > Date.now()) return cached.data;
-
-    const message = Soup.Message.new("GET", url);
     const bytes = await this._session.send_and_read_async(
-      message,
+      Soup.Message.new("GET", url),
       GLib.PRIORITY_DEFAULT,
       cancellable,
     );
-    const data = JSON.parse(new TextDecoder().decode(bytes.get_data()));
-
-    // These APIs return a JSON body on failures too. Caching one would pin the
-    // error in place for the whole TTL, with no way for the user to retry.
-    if (this._remoteCache && message.get_status() === Soup.Status.OK) {
-      // Insertion order doubles as the eviction order.
-      this._remoteCache.delete(url);
-      this._remoteCache.set(url, {
-        data,
-        expiry: Date.now() + REMOTE_CACHE_TTL_MS,
-      });
-      while (this._remoteCache.size > REMOTE_CACHE_MAX_ENTRIES) {
-        this._remoteCache.delete(this._remoteCache.keys().next().value);
-      }
-    }
-
-    return data;
+    return JSON.parse(new TextDecoder().decode(bytes.get_data()));
   }
 
   _showRemoteError(text, generation, cancellable, message) {
@@ -3465,7 +2853,7 @@ export default class SearchBar extends Extension {
         : null;
 
     if (results.length === 0) {
-      this._showNoResults(this._queryText().trim());
+      this._showNoResults(this._entry?.get_text().trim() ?? "");
       return;
     }
 
@@ -3495,7 +2883,7 @@ export default class SearchBar extends Extension {
         row.add_style_class_name("weather-card");
 
         const infoBox = new St.BoxLayout({
-          vertical: true,
+          orientation: Clutter.Orientation.VERTICAL,
           x_expand: true,
           y_align: Clutter.ActorAlign.CENTER,
         });
@@ -3520,7 +2908,7 @@ export default class SearchBar extends Extension {
 
         const card = new St.BoxLayout({
           style_class: "spotlight-weather-content",
-          vertical: false,
+          orientation: Clutter.Orientation.HORIZONTAL,
           x_expand: true,
         });
         card.add_child(this._createResultIcon(result));
@@ -3538,13 +2926,13 @@ export default class SearchBar extends Extension {
 
         const answerBox = new St.BoxLayout({
           style_class: "spotlight-answer-content",
-          vertical: false,
+          orientation: Clutter.Orientation.HORIZONTAL,
           x_expand: true,
         });
         answerBox.add_child(this._createResultIcon(result));
 
         const answerText = new St.BoxLayout({
-          vertical: true,
+          orientation: Clutter.Orientation.VERTICAL,
           x_expand: true,
           y_align: Clutter.ActorAlign.CENTER,
           style_class: "spotlight-result-text",
@@ -3577,13 +2965,13 @@ export default class SearchBar extends Extension {
       } else {
         const rowBox = new St.BoxLayout({
           style_class: "spotlight-result-row-content",
-          vertical: false,
+          orientation: Clutter.Orientation.HORIZONTAL,
           x_expand: true,
         });
         rowBox.add_child(this._createResultIcon(result));
 
         const textBox = new St.BoxLayout({
-          vertical: true,
+          orientation: Clutter.Orientation.VERTICAL,
           x_expand: true,
           y_align: Clutter.ActorAlign.CENTER,
           style_class: "spotlight-result-text",
@@ -3652,7 +3040,7 @@ export default class SearchBar extends Extension {
   }
 
   _prepareResultRows(count) {
-    this._removeLater("_selectionScrollLaterId");
+    this._removeSource("_selectionScrollTimeoutId");
     this._statusSpinner.stop();
     this._statusBox.hide();
     this._resultMetadataActors = [];
@@ -3766,7 +3154,7 @@ export default class SearchBar extends Extension {
     this._resultsState = "clearing";
     this._results = [];
     this._selectedIndex = -1;
-    this._removeLater("_selectionScrollLaterId");
+    this._removeSource("_selectionScrollTimeoutId");
     this._resultRows.forEach((row) => {
       row.disconnectObject(this);
       row.destroy();
@@ -3841,7 +3229,7 @@ export default class SearchBar extends Extension {
           if (appInfo) appInfo.launch([], null);
         }
       } catch (e) {
-        logError(`failed to launch app: ${e}`);
+        console.error(`[Superbar] Failed to launch app: ${e}`);
       }
     } else if (result.type === "provider") {
       if (result.clipboardText) {
@@ -3853,7 +3241,9 @@ export default class SearchBar extends Extension {
       this._searchProviderManager
         ?.activate(result, global.get_current_time())
         .catch((error) =>
-          logError(`search provider activation failed: ${error}`),
+          console.error(
+            `[Superbar] Search provider activation failed: ${error}`,
+          ),
         );
     } else if (result.type === "weather" || result.type === "file") {
       this._openUri(result.uri);
@@ -3933,29 +3323,23 @@ export default class SearchBar extends Extension {
     if (this._selectedIndex >= 0) {
       this._queueScrollToSelection();
     } else {
-      this._removeLater("_selectionScrollLaterId");
+      this._removeSource("_selectionScrollTimeoutId");
     }
   }
 
   _queueScrollToSelection() {
-    this._removeLater("_selectionScrollLaterId");
+    this._removeSource("_selectionScrollTimeoutId");
 
     this._resultsBox.queue_relayout();
-    // _scrollToSelection reads allocations, so it has to run after the relayout
-    // queued above. BEFORE_REDRAW would not do: laters run from the stage's
-    // before-update, which is still ahead of clutter_stage_maybe_relayout, so
-    // it would read the previous frame's geometry — as would the zero-delay
-    // PRIORITY_DEFAULT timeout this used to be. IDLE runs at
-    // G_PRIORITY_DEFAULT_IDLE (200), below the frame clock's
-    // CLUTTER_PRIORITY_REDRAW (150), so the frame that performs the relayout
-    // goes first. The cost is that sustained animation can delay it.
-    this._selectionScrollLaterId = global.compositor
-      .get_laters()
-      .add(Meta.LaterType.IDLE, () => {
-        this._selectionScrollLaterId = null;
-        if (this._enabled) this._scrollToSelection();
+    this._selectionScrollTimeoutId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      0,
+      () => {
+        this._selectionScrollTimeoutId = null;
+        this._scrollToSelection();
         return GLib.SOURCE_REMOVE;
-      });
+      },
+    );
   }
 
   _scrollToSelection() {
@@ -4000,18 +3384,18 @@ export default class SearchBar extends Extension {
   }
 
   _queueResultsHeightUpdate() {
-    this._removeLater("_resultsHeightLaterId");
+    this._removeSource("_resultsHeightTimeoutId");
     if (this._resultsState === "hidden") return;
 
-    // Reads allocation-derived widths, so it needs the settled layout for the
-    // same reason _queueScrollToSelection does.
-    this._resultsHeightLaterId = global.compositor
-      .get_laters()
-      .add(Meta.LaterType.IDLE, () => {
-        this._resultsHeightLaterId = null;
+    this._resultsHeightTimeoutId = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT,
+      0,
+      () => {
+        this._resultsHeightTimeoutId = null;
         if (this._enabled) this._updateResultsHeight(false);
         return GLib.SOURCE_REMOVE;
-      });
+      },
+    );
   }
 
   _setResultsHeight(targetHeight, animate = true) {
@@ -4289,7 +3673,8 @@ export default class SearchBar extends Extension {
     this._gnomeAppPalette = palette;
     this._container.set_style(`color: ${foreground};`);
     this._entry?.set_style(
-      `color: ${foreground}; ` +
+      ENTRY_RESET_STYLE +
+        `color: ${foreground}; ` +
         `caret-color: ${rgba(palette.accentForeground, 0.96)}; ` +
         `selection-background-color: ${rgba(palette.accent, 0.3)}; ` +
         `selected-color: ${selectedForeground};`,
@@ -4305,13 +3690,6 @@ export default class SearchBar extends Extension {
         `background-color: ${rgba(palette.accent, 0.11)}; ` +
         `color: ${rgba(palette.accentForeground, 0.82)};`,
     );
-    this._modeChip?.set_style(
-      `border-color: ${rgba(palette.accent, 0.18)}; ` +
-        `background-color: ${rgba(palette.accent, 0.14)};`,
-    );
-    this._modeChipLabel?.set_style(
-      `color: ${rgba(palette.accentForeground, 0.86)};`,
-    );
     this._updateSelection();
   }
 
@@ -4320,8 +3698,6 @@ export default class SearchBar extends Extension {
     this._modeDot?.set_style(null);
     this._statusSpinner?.set_style(null);
     this._actionsKey?.set_style(null);
-    this._modeChip?.set_style(null);
-    this._modeChipLabel?.set_style(null);
     this._resultRows?.forEach((row) => row.set_style(null));
   }
 
@@ -4331,7 +3707,7 @@ export default class SearchBar extends Extension {
     // differ, fall back to the fixed colors in stylesheet.css.
     if (Main.getStyleVariant() !== styleVariant) {
       this._container.set_style(null);
-      this._entry?.set_style(null);
+      this._entry?.set_style(ENTRY_RESET_STYLE);
       return;
     }
 
@@ -4343,6 +3719,6 @@ export default class SearchBar extends Extension {
     // Result labels inherit the container's inline color, but the entry's text
     // does not pick up an ancestor's inline color, so it must be set directly.
     this._container.set_style(`color: ${color};`);
-    this._entry?.set_style(`color: ${color};`);
+    this._entry?.set_style(`${ENTRY_RESET_STYLE}color: ${color};`);
   }
 }
